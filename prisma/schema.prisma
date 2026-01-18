@@ -84,9 +84,10 @@ model Movement {
   id          Int          @id @default(autoincrement())
   userId      Int
   accountId   Int
-  categoryId  Int
+  categoryId  Int?
   type        MovementType
   amountCents Int
+  balanceSnapshotCents Int
   occurredAt  DateTime
   description String?
 
@@ -97,9 +98,10 @@ model Movement {
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   account     Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  category    Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   @@index([userId, occurredAt])
+  @@index([userId, isDeleted])
   @@index([accountId])
   @@index([categoryId])
 }
