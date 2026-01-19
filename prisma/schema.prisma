@@ -69,6 +69,7 @@ model Category {
   name      String
   type      CategoryType
   userId    Int?
+  isActive  Boolean      @default(true)
 
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
@@ -79,6 +80,7 @@ model Category {
   @@unique([name, userId])
   @@index([userId])
 }
+
 
 model Movement {
   id          Int          @id @default(autoincrement())

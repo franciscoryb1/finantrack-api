@@ -6,13 +6,15 @@ import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { MovementsModule } from './movements/movements.module';
+import { CategoriesModule } from './categories/categories.module';
 
 @Module({
   imports: [PrismaModule,
     AuthModule,
     UsersModule,
     AccountsModule,
-    MovementsModule],
+    MovementsModule,
+    CategoriesModule],
   controllers: [AppController],
   providers: [AppService],
 })
