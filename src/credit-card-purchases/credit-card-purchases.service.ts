@@ -42,7 +42,7 @@ export class CreditCardPurchasesService {
             throw new ForbiddenException('Credit card not found or inactive');
         }
 
-        // return card;
+        return card;
     }
 
     private async hasBilledInstallments(purchaseId: number) {
@@ -68,13 +68,30 @@ export class CreditCardPurchasesService {
             description,
         } = dto;
 
-        // Validar categoria y tarjeta
+        // 1️⃣ Validaciones base
         await this.validateCategory(userId, categoryId);
-        await this.validateCard(userId, creditCardId);
+        const creditCard = await this.validateCard(userId, creditCardId);
 
         const occurredDate = new Date(occurredAt);
 
         return this.prisma.$transaction(async (tx) => {
+
+            // 2️⃣ Validar límite de la tarjeta (monto comprometido)
+            const committed = await tx.creditCardInstallment.aggregate({
+                where: {
+                    purchase: { userId, creditCardId },
+                    status: { in: ['PENDING', 'BILLED'] },
+                },
+                _sum: { amountCents: true },
+            });
+
+            const committedCents = committed._sum.amountCents ?? 0;
+
+            if (committedCents + totalAmountCents > creditCard.limitCents) {
+                throw new BadRequestException('Credit card limit exceeded');
+            }
+
+            // 3️⃣ Crear compra
             const purchase = await tx.creditCardPurchase.create({
                 data: {
                     userId,
@@ -87,46 +104,24 @@ export class CreditCardPurchasesService {
                 },
             });
 
-            // si es en cuotas, genero installments
+            // 4️⃣ Generar cuotas (si aplica)
             if (installmentsCount > 1) {
                 const baseAmount = Math.floor(totalAmountCents / installmentsCount);
-                let remainder = totalAmountCents % installmentsCount;
+                const remainder = totalAmountCents % installmentsCount;
 
-                // busco un resumen (statement) vigente para asignarle la primer cuota
-                const currentStatement = await tx.creditCardStatement.findFirst({
-                    where: {
-                        creditCardId,
-                        status: 'OPEN',
-                        periodStartDate: { lte: occurredDate },
-                        closingDate: { gt: occurredDate },
-                    },
-                    orderBy: { closingDate: 'asc' },
-                });
-
-                if (!currentStatement) {
-                    throw new BadRequestException('No open statement for credit card');
-                }
-
-                // array donde voy a generar las cuotas
                 const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
 
                 for (let i = 1; i <= installmentsCount; i++) {
                     const amount = i === 1 ? baseAmount + remainder : baseAmount;
-
-                    const targetDate = new Date(
-                        currentStatement.year,
-                        currentStatement.month - 1 + (i - 1),
-                        1,
-                    );
 
                     installmentsData.push({
                         userId,
                         purchaseId: purchase.id,
                         installmentNumber: i,
                         amountCents: amount,
-                        year: targetDate.getFullYear(),
-                        month: targetDate.getMonth() + 1,
                         status: CreditCardInstallmentStatus.PENDING,
+                        year: null,
+                        month: null,
                     });
                 }
 
@@ -138,6 +133,8 @@ export class CreditCardPurchasesService {
             return purchase;
         });
     }
+
+
 
     async update(userId: number, purchaseId: number, dto: UpdatePurchaseDto) {
         const purchase = await this.prisma.creditCardPurchase.findUnique({
