@@ -1,0 +1,40 @@
+import {
+    Body,
+    Controller,
+    Delete,
+    Param,
+    ParseIntPipe,
+    Patch,
+    Post,
+    Req,
+    UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CreditCardPurchasesService } from './credit-card-purchases.service';
+import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { UpdatePurchaseDto } from './dto/update-purchase.dto';
+
+@Controller('credit-card-purchases')
+@UseGuards(JwtAuthGuard)
+export class CreditCardPurchasesController {
+    constructor(private readonly service: CreditCardPurchasesService) { }
+
+    @Post()
+    create(@Req() req: any, @Body() dto: CreatePurchaseDto) {
+        return this.service.create(req.user.userId, dto);
+    }
+
+    @Patch(':id')
+    update(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: UpdatePurchaseDto,
+    ) {
+        return this.service.update(req.user.userId, id, dto);
+    }
+
+    @Delete(':id')
+    remove(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+        return this.service.softDelete(req.user.userId, id);
+    }
+}

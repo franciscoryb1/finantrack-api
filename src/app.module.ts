@@ -8,6 +8,7 @@ import { AccountsModule } from './accounts/accounts.module';
 import { MovementsModule } from './movements/movements.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CreditCardsModule } from './credit-cards/credit-cards.module';
+import { CreditCardPurchasesModule } from './credit-card-purchases/credit-card-purchases.module';
 
 @Module({
   imports: [PrismaModule,
@@ -16,7 +17,8 @@ import { CreditCardsModule } from './credit-cards/credit-cards.module';
     AccountsModule,
     MovementsModule,
     CategoriesModule,
-    CreditCardsModule],
+    CreditCardsModule,
+    CreditCardPurchasesModule],
   controllers: [AppController],
   providers: [AppService],
 })
