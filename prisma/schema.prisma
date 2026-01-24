@@ -177,6 +177,7 @@ model CreditCardPurchase {
   userId             Int
   creditCardId       Int
   categoryId         Int?
+  firstStatementSequence Int
 
   totalAmountCents   Int
   installmentsCount  Int       // >= 1
@@ -203,6 +204,7 @@ model CreditCardInstallment {
   id                 Int                         @id @default(autoincrement())
   userId             Int
   purchaseId         Int
+  billingCycleOffset Int
   statementId        Int?
 
   installmentNumber  Int
@@ -210,6 +212,7 @@ model CreditCardInstallment {
 
   year               Int?
   month              Int?
+
 
   status             CreditCardInstallmentStatus @default(PENDING)
 
