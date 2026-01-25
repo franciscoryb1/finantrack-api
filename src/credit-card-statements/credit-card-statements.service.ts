@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateStatementDto } from './dto/create-statement.dto';
 import { AccountType, CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
 import { PayStatementDto } from './dto/pay-statement.dto';
+import { UpdateStatementDatesDto } from './dto/update-statement-dates.dto';
 
 @Injectable()
 export class CreditCardStatementsService {
@@ -74,6 +75,45 @@ export class CreditCardStatementsService {
             },
         });
     }
+
+    async updateDates(
+        userId: number,
+        statementId: number,
+        dto: UpdateStatementDatesDto,
+    ) {
+        const { closingDate, dueDate } = dto;
+
+        if (!closingDate && !dueDate) {
+            throw new BadRequestException('Nothing to update');
+        }
+
+        const statement = await this.prisma.creditCardStatement.findUnique({
+            where: { id: statementId },
+        });
+
+        if (!statement) {
+            throw new NotFoundException('Statement not found');
+        }
+
+        if (statement.userId !== userId) {
+            throw new ForbiddenException();
+        }
+
+        if (statement.status !== CreditCardStatementStatus.OPEN) {
+            throw new BadRequestException(
+                'Only open statements can be edited',
+            );
+        }
+
+        return this.prisma.creditCardStatement.update({
+            where: { id: statement.id },
+            data: {
+                ...(closingDate && { closingDate: new Date(closingDate) }),
+                ...(dueDate && { dueDate: new Date(dueDate) }),
+            },
+        });
+    }
+
 
     // -----------------------
     // Cerrar statement

@@ -4,6 +4,7 @@ import {
     Param,
     ParseIntPipe,
     Post,
+    Patch,
     Req,
     UseGuards,
 } from '@nestjs/common';
@@ -11,6 +12,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreditCardStatementsService } from './credit-card-statements.service';
 import { CreateStatementDto } from './dto/create-statement.dto';
 import { PayStatementDto } from './dto/pay-statement.dto';
+import { UpdateStatementDatesDto } from './dto/update-statement-dates.dto';
 
 @Controller('credit-card-statements')
 @UseGuards(JwtAuthGuard)
@@ -20,6 +22,15 @@ export class CreditCardStatementsController {
     @Post()
     create(@Req() req: any, @Body() dto: CreateStatementDto) {
         return this.service.create(req.user.userId, dto);
+    }
+
+    @Patch(':id/dates')
+    updateDates(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: UpdateStatementDatesDto,
+    ) {
+        return this.service.updateDates(req.user.userId, id, dto);
     }
 
     @Post(':id/close')
