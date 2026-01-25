@@ -94,6 +94,10 @@ export class CreditCardStatementsService {
                 throw new ForbiddenException();
             }
 
+            if (statement.status === CreditCardStatementStatus.PAID) {
+                throw new BadRequestException('Paid statement cannot be closed');
+            }
+
             if (statement.status !== CreditCardStatementStatus.OPEN) {
                 throw new BadRequestException('Statement is not open');
             }

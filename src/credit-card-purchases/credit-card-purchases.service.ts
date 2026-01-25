@@ -56,6 +56,20 @@ export class CreditCardPurchasesService {
         return count > 0;
     }
 
+    private async hasClosedStatement(purchaseId: number) {
+        const count = await this.prisma.creditCardInstallment.count({
+            where: {
+                purchaseId,
+                statement: {
+                    status: { in: ['CLOSED', 'PAID'] },
+                },
+            },
+        });
+
+        return count > 0;
+    }
+
+
     // ---------- core ----------
 
     async create(userId: number, dto: CreatePurchaseDto) {
@@ -188,9 +202,16 @@ export class CreditCardPurchasesService {
             throw new ForbiddenException();
         }
 
-        if (await this.hasBilledInstallments(purchaseId)) {
-            throw new BadRequestException('Cannot modify a billed purchase');
+        if (
+            await this.hasBilledInstallments(purchaseId) ||
+            await this.hasClosedStatement(purchaseId)
+        ) {
+            throw new BadRequestException(
+                'Cannot modify purchase linked to a closed statement',
+            );
         }
+
+
 
         if (dto.categoryId !== undefined) {
             await this.validateCategory(userId, dto.categoryId);
@@ -246,9 +267,15 @@ export class CreditCardPurchasesService {
             throw new ForbiddenException();
         }
 
-        if (await this.hasBilledInstallments(purchaseId)) {
-            throw new BadRequestException('Cannot delete a billed purchase');
+        if (
+            await this.hasBilledInstallments(purchaseId) ||
+            await this.hasClosedStatement(purchaseId)
+        ) {
+            throw new BadRequestException(
+                'Cannot modify purchase linked to a closed statement',
+            );
         }
+
 
         return this.prisma.$transaction(async (tx) => {
             await tx.creditCardInstallment.deleteMany({
