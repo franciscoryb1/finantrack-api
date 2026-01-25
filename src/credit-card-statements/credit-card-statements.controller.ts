@@ -10,6 +10,7 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreditCardStatementsService } from './credit-card-statements.service';
 import { CreateStatementDto } from './dto/create-statement.dto';
+import { PayStatementDto } from './dto/pay-statement.dto';
 
 @Controller('credit-card-statements')
 @UseGuards(JwtAuthGuard)
@@ -28,4 +29,14 @@ export class CreditCardStatementsController {
     ) {
         return this.service.close(req.user.userId, id);
     }
+
+    @Post(':id/pay')
+    pay(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: PayStatementDto,
+    ) {
+        return this.service.pay(req.user.userId, id, dto);
+    }
+
 }

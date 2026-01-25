@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStatementDto } from './dto/create-statement.dto';
-import { CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
+import { AccountType, CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
+import { PayStatementDto } from './dto/pay-statement.dto';
 
 @Injectable()
 export class CreditCardStatementsService {
@@ -194,4 +195,110 @@ export class CreditCardStatementsService {
             });
         });
     }
+
+
+    async pay(
+        userId: number,
+        statementId: number,
+        dto: PayStatementDto,
+    ) {
+        const { accountId, description, paidAt } = dto;
+
+        return this.prisma.$transaction(async (tx) => {
+
+            // 1️⃣ Traer statement
+            const statement = await tx.creditCardStatement.findUnique({
+                where: { id: statementId },
+            });
+
+            if (!statement) {
+                throw new NotFoundException('Statement not found');
+            }
+
+            if (statement.userId !== userId) {
+                throw new ForbiddenException();
+            }
+
+            if (statement.status === CreditCardStatementStatus.OPEN) {
+                throw new BadRequestException('Statement is not closed');
+            }
+
+            if (statement.status === CreditCardStatementStatus.PAID) {
+                throw new BadRequestException('Statement already paid');
+            }
+
+            if (statement.totalCents <= 0) {
+                throw new BadRequestException('Statement total is zero');
+            }
+
+            // 2️⃣ Validar cuenta de pago
+            const account = await tx.account.findFirst({
+                where: {
+                    id: accountId,
+                    userId,
+                    isActive: true,
+                    type: {
+                        in: [
+                            AccountType.CASH,
+                            AccountType.BANK,
+                            AccountType.WALLET,
+                        ],
+                    },
+                },
+            });
+
+            if (!account) {
+                throw new BadRequestException(
+                    'Payment account must be CASH, BANK or WALLET',
+                );
+            }
+
+            // 3️⃣ Crear movimiento (EXPENSE)
+            const newBalance =
+                account.currentBalanceCents - statement.totalCents;
+
+            if (newBalance < 0) {
+                throw new BadRequestException('Insufficient account balance');
+            }
+
+            await tx.movement.create({
+                data: {
+                    userId,
+                    accountId,
+                    type: 'EXPENSE',
+                    amountCents: statement.totalCents,
+                    occurredAt: paidAt ? new Date(paidAt) : new Date(),
+                    description:
+                        description ??
+                        `Pago resumen tarjeta ${statement.creditCardId} ${statement.month}/${statement.year}`,
+                    balanceSnapshotCents: newBalance,
+                },
+            });
+
+            await tx.account.update({
+                where: { id: account.id },
+                data: { currentBalanceCents: newBalance },
+            });
+
+            // 4️⃣ Marcar cuotas como PAID
+            await tx.creditCardInstallment.updateMany({
+                where: {
+                    statementId: statement.id,
+                    status: CreditCardInstallmentStatus.BILLED,
+                },
+                data: {
+                    status: CreditCardInstallmentStatus.PAID,
+                },
+            });
+
+            // 5️⃣ Marcar statement como PAID
+            return tx.creditCardStatement.update({
+                where: { id: statement.id },
+                data: {
+                    status: CreditCardStatementStatus.PAID,
+                },
+            });
+        });
+    }
+
 }
