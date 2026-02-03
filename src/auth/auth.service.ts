@@ -46,22 +46,4 @@ export class AuthService {
   async findUserByPhone(phoneNumber: string) {
     return this.usersService.findByPhone(phoneNumber);
   }
-
-  async issueJwtForUser(user: any) {
-    const payload = {
-      sub: user.id,
-      email: user.email,
-    };
-
-    return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        email: user.email,
-      },
-    };
-  }
-
-
-
 }

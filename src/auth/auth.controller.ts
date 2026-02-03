@@ -31,6 +31,11 @@ export class AuthController {
       throw new ForbiddenException('User is inactive');
     }
 
-    return this.authService.issueJwtForUser(user);
+    return {
+      user: {
+        id: user.id,
+        phoneNumber: user.phoneNumber,
+      },
+    };
   }
 }
