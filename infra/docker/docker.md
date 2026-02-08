@@ -3,21 +3,22 @@
 Este proyecto utiliza **PostgreSQL corriendo en Docker** como base de datos local de desarrollo.
 
 La infraestructura está pensada para ser:
-- reproducible
-- persistente
-- independiente del backend
-- fácilmente migrable a nube en el futuro
+
+- ♻️ Reproducible
+- 💾 Persistente
+- 🔌 Independiente del backend
+- ☁️ Fácilmente migrable a nube en el futuro
 
 ---
 
 ## 📦 Contenedor
 
-- **Imagen**: postgres:16
+- **Imagen**: `postgres:16`
 - **Nombre del contenedor**: `finances_postgres`
 - **Base de datos**: `finances`
 - **Usuario**: `finances_user`
-- **Puerto**: `5432`
-- **Persistencia**: volumen Docker (`finances_pgdata`)
+- **Puerto expuesto**: `5432`
+- **Persistencia**: volumen Docker
 
 ---
 
@@ -37,6 +38,7 @@ finances_backend/
 ## ▶️ Comandos básicos
 
 ### Levantar el contenedor
+
 ```bash
 docker compose up -d
 ````
@@ -53,7 +55,7 @@ docker ps
 docker compose down
 ```
 
-> ⚠️ Esto **NO borra los datos** (gracias al volumen)
+> ⚠️ Esto **NO borra los datos** (gracias al volumen Docker)
 
 ---
 
@@ -65,7 +67,7 @@ docker compose down
 docker logs finances_postgres
 ```
 
-Buscar:
+Buscar el mensaje:
 
 ```
 database system is ready to accept connections
@@ -95,17 +97,22 @@ docker exec -it finances_postgres psql -U finances_user -d finances
 
 ## 💾 Persistencia de datos
 
-Los datos se guardan en un **volumen Docker** llamado:
+Los datos **NO viven en el proyecto**, sino en un **volumen Docker**.
+
+En el `docker-compose.yml` se define:
+
+```yaml
+volumes:
+  finances_pgdata:
+```
+
+Docker Compose **prefija automáticamente** el nombre del volumen con el nombre del proyecto, por ejemplo:
 
 ```
-finances_pgdata
+docker_finances_pgdata
 ```
 
-Esto significa que:
-
-* Reiniciar Docker NO borra datos
-* Bajar y subir el contenedor NO borra datos
-* Los datos solo se pierden si se borra explícitamente el volumen
+👉 Ese es el volumen real donde vive Postgres.
 
 ### Listar volúmenes
 
@@ -113,11 +120,15 @@ Esto significa que:
 docker volume ls
 ```
 
-### ⚠️ Borrar datos (solo si querés resetear todo)
+---
+
+### ⚠️ Borrar datos (solo si querés resetear TODO)
 
 ```bash
-docker volume rm finances_pgdata
+docker volume rm docker_finances_pgdata
 ```
+
+> ❗ Esto elimina **toda la base de datos**
 
 ---
 
@@ -137,6 +148,86 @@ accepting connections
 
 ---
 
+## 💼 Backup & Restore (migrar datos a otra PC)
+
+Esta sección permite **copiar toda la base de datos** a otra computadora **sin perder nada**.
+
+---
+
+### 📤 Backup del volumen (PC origen)
+
+#### 1️⃣ Detener el contenedor (OBLIGATORIO)
+
+```bash
+docker compose down
+```
+
+---
+
+#### 2️⃣ Crear backup del volumen
+
+Desde la carpeta del proyecto:
+
+```bash
+docker run --rm `
+  -v docker_finances_pgdata:/volume `
+  -v ${PWD}:/backup `
+  busybox `
+  tar czf /backup/docker_finances_pgdata.tar.gz -C /volume .
+```
+
+📦 Se genera el archivo:
+
+```
+docker_finances_pgdata.tar.gz
+```
+
+➡️ Copiar este archivo a la otra PC (pendrive, Drive, scp, etc).
+
+---
+
+### 📥 Restore del volumen (PC destino)
+
+#### 1️⃣ Crear el volumen vacío
+
+```bash
+docker volume create docker_finances_pgdata
+```
+
+---
+
+#### 2️⃣ Restaurar los datos
+
+Ubicate en la carpeta donde esté el `.tar.gz` y ejecutá:
+
+```bash
+docker run --rm `
+  -v docker_finances_pgdata:/volume `
+  -v ${PWD}:/backup `
+  busybox `
+  tar xzf /backup/docker_finances_pgdata.tar.gz -C /volume
+```
+
+---
+
+#### 3️⃣ Levantar el contenedor
+
+```bash
+docker compose up -d
+```
+
+---
+
+#### 4️⃣ Verificación
+
+```bash
+docker exec -it finances_postgres psql -U finances_user -d finances
+```
+
+Si ves tus tablas → ✅ restore correcto.
+
+---
+
 ## 🔧 Configuración importante
 
 * Las credenciales **son solo para desarrollo**
@@ -147,23 +238,9 @@ accepting connections
 
 ## 🚫 Qué NO hace este contenedor
 
-* No crea tablas
-* No maneja migraciones
-* No conoce el backend
-* No contiene lógica de negocio
+* ❌ No crea tablas
+* ❌ No maneja migraciones
+* ❌ No conoce el backend
+* ❌ No contiene lógica de negocio
 
-Es **solo infraestructura**.
-
----
-
-## 📌 Próximos pasos (roadmap)
-
-1. Backend NestJS
-2. Integración ORM
-3. Migraciones
-4. Auth
-5. Core financiero
-
-Este contenedor **no cambia** en esos pasos.
-
----
+👉 Es **solo infraestructura**.
