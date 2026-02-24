@@ -42,6 +42,8 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  refreshTokenHash String?
+
   accounts     Account[]
   categories   Category[]
   movements    Movement[]
