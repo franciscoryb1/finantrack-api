@@ -2,6 +2,7 @@ import {
     Body,
     Controller,
     Delete,
+    Get,
     Param,
     ParseIntPipe,
     Patch,
@@ -18,6 +19,14 @@ import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 @UseGuards(JwtAuthGuard)
 export class CreditCardPurchasesController {
     constructor(private readonly service: CreditCardPurchasesService) { }
+
+    @Get('card/:cardId')
+    listByCard(
+        @Req() req: any,
+        @Param('cardId', ParseIntPipe) cardId: number,
+    ) {
+        return this.service.listByCard(req.user.userId, cardId);
+    }
 
     @Post()
     create(@Req() req: any, @Body() dto: CreatePurchaseDto) {

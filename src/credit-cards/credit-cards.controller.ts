@@ -47,4 +47,12 @@ export class CreditCardsController {
     activate(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
         return this.service.setActive(req.user.userId, id, true);
     }
+
+    @Get(':id/summary')
+    getSummary(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+    ) {
+        return this.service.getSummary(req.user.userId, id);
+    }
 }

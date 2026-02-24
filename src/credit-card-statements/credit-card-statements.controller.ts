@@ -7,6 +7,7 @@ import {
     Patch,
     Req,
     UseGuards,
+    Get,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreditCardStatementsService } from './credit-card-statements.service';
@@ -18,6 +19,22 @@ import { UpdateStatementDatesDto } from './dto/update-statement-dates.dto';
 @UseGuards(JwtAuthGuard)
 export class CreditCardStatementsController {
     constructor(private readonly service: CreditCardStatementsService) { }
+
+    @Get('card/:cardId')
+    listByCard(
+        @Req() req: any,
+        @Param('cardId', ParseIntPipe) cardId: number,
+    ) {
+        return this.service.listByCard(req.user.userId, cardId);
+    }
+
+    @Get(':id')
+    getDetail(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+    ) {
+        return this.service.getDetail(req.user.userId, id);
+    }
 
     @Post()
     create(@Req() req: any, @Body() dto: CreateStatementDto) {

@@ -72,6 +72,20 @@ export class CreditCardPurchasesService {
 
     // ---------- core ----------
 
+    async listByCard(userId: number, creditCardId: number) {
+        return this.prisma.creditCardPurchase.findMany({
+            where: {
+                userId,
+                creditCardId,
+                isDeleted: false,
+            },
+            orderBy: { occurredAt: 'desc' },
+            include: {
+                category: { select: { id: true, name: true } },
+            },
+        });
+    }
+
     async create(userId: number, dto: CreatePurchaseDto) {
         const {
             creditCardId,
@@ -192,6 +206,7 @@ export class CreditCardPurchasesService {
     async update(userId: number, purchaseId: number, dto: UpdatePurchaseDto) {
         const purchase = await this.prisma.creditCardPurchase.findUnique({
             where: { id: purchaseId },
+            include: { creditCard: true },
         });
 
         if (!purchase || purchase.isDeleted) {
@@ -211,24 +226,16 @@ export class CreditCardPurchasesService {
             );
         }
 
-
-
         if (dto.categoryId !== undefined) {
             await this.validateCategory(userId, dto.categoryId);
         }
 
         return this.prisma.$transaction(async (tx) => {
-            // si cambian monto o cuotas → borramos installments y regeneramos
+
             const mustRegenerate =
                 dto.totalAmountCents !== undefined ||
                 dto.installmentsCount !== undefined ||
                 dto.occurredAt !== undefined;
-
-            if (mustRegenerate) {
-                await tx.creditCardInstallment.deleteMany({
-                    where: { purchaseId },
-                });
-            }
 
             const updated = await tx.creditCardPurchase.update({
                 where: { id: purchaseId },
@@ -238,16 +245,79 @@ export class CreditCardPurchasesService {
                 },
             });
 
-            if (mustRegenerate && updated.installmentsCount > 1) {
-                // reutilizamos create() logic simplificada
-                await this.create(userId, {
-                    creditCardId: updated.creditCardId,
-                    categoryId: updated.categoryId ?? undefined,
-                    totalAmountCents: updated.totalAmountCents,
-                    installmentsCount: updated.installmentsCount,
-                    occurredAt: updated.occurredAt.toISOString(),
-                    description: updated.description ?? undefined,
+            if (mustRegenerate) {
+
+                await tx.creditCardInstallment.deleteMany({
+                    where: { purchaseId },
                 });
+
+                const occurredDate = updated.occurredAt;
+
+                // 🔹 recalcular firstStatementSequence
+                const openStatement = await tx.creditCardStatement.findFirst({
+                    where: {
+                        creditCardId: updated.creditCardId,
+                        status: 'OPEN',
+                    },
+                });
+
+                let firstStatementSequence: number;
+
+                if (openStatement) {
+                    if (
+                        occurredDate < openStatement.periodStartDate ||
+                        occurredDate >= openStatement.closingDate
+                    ) {
+                        throw new BadRequestException(
+                            'Purchase date is outside the open statement period',
+                        );
+                    }
+
+                    firstStatementSequence = openStatement.sequenceNumber;
+                } else {
+                    const lastStatement = await tx.creditCardStatement.findFirst({
+                        where: { creditCardId: updated.creditCardId },
+                        orderBy: { sequenceNumber: 'desc' },
+                    });
+
+                    firstStatementSequence = lastStatement
+                        ? lastStatement.sequenceNumber + 1
+                        : 1;
+                }
+
+                await tx.creditCardPurchase.update({
+                    where: { id: purchaseId },
+                    data: { firstStatementSequence },
+                });
+
+                // 🔹 regenerar cuotas
+                const { totalAmountCents, installmentsCount } = updated;
+
+                if (installmentsCount > 1) {
+                    const baseAmount = Math.floor(totalAmountCents / installmentsCount);
+                    const remainder = totalAmountCents % installmentsCount;
+
+                    const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
+
+                    for (let i = 1; i <= installmentsCount; i++) {
+                        const amount = i === 1 ? baseAmount + remainder : baseAmount;
+
+                        installmentsData.push({
+                            userId,
+                            purchaseId,
+                            installmentNumber: i,
+                            billingCycleOffset: i - 1,
+                            amountCents: amount,
+                            status: 'PENDING',
+                            year: null,
+                            month: null,
+                        });
+                    }
+
+                    await tx.creditCardInstallment.createMany({
+                        data: installmentsData,
+                    });
+                }
             }
 
             return updated;

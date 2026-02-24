@@ -97,4 +97,35 @@ export class CreditCardsService {
             data: { isActive },
         });
     }
+
+    async getSummary(userId: number, cardId: number) {
+        const card = await this.prisma.creditCard.findFirst({
+            where: { id: cardId, userId },
+        });
+
+        if (!card) throw new NotFoundException();
+
+        const pending = await this.prisma.creditCardInstallment.aggregate({
+            where: {
+                purchase: { creditCardId: cardId },
+                status: { in: ['PENDING', 'BILLED'] },
+            },
+            _sum: { amountCents: true },
+        });
+
+        const openStatement = await this.prisma.creditCardStatement.findFirst({
+            where: {
+                creditCardId: cardId,
+                status: 'OPEN',
+            },
+        });
+
+        return {
+            limitCents: card.limitCents,
+            committedCents: pending._sum.amountCents ?? 0,
+            availableCents:
+                card.limitCents - (pending._sum.amountCents ?? 0),
+            openStatement,
+        };
+    }
 }

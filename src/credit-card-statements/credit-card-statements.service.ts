@@ -14,6 +14,41 @@ import { UpdateStatementDatesDto } from './dto/update-statement-dates.dto';
 export class CreditCardStatementsService {
     constructor(private readonly prisma: PrismaService) { }
 
+    async listByCard(userId: number, creditCardId: number) {
+        return this.prisma.creditCardStatement.findMany({
+            where: {
+                userId,
+                creditCardId,
+            },
+            orderBy: { sequenceNumber: 'desc' },
+        });
+    }
+
+    async getDetail(userId: number, statementId: number) {
+        const statement = await this.prisma.creditCardStatement.findUnique({
+            where: { id: statementId },
+            include: {
+                installments: {
+                    include: {
+                        purchase: {
+                            select: {
+                                description: true,
+                                occurredAt: true,
+                                installmentsCount: true,
+                            },
+                        },
+                    },
+                },
+                payments: true,
+            },
+        });
+
+        if (!statement) throw new NotFoundException();
+        if (statement.userId !== userId) throw new ForbiddenException();
+
+        return statement;
+    }
+
     // -----------------------
     // Crear o asegurar statement OPEN
     // -----------------------
