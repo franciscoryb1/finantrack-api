@@ -43,8 +43,6 @@ export class CreditCardsService {
                 name: dto.name,
                 brand: dto.brand,
                 limitCents: dto.limitCents,
-                closingDay: dto.closingDay,
-                dueDay: dto.dueDay,
                 cardLast4: dto.cardLast4,
                 cardExpiresAt: new Date(dto.cardExpiresAt),
                 bankAccountId: dto.bankAccountId,

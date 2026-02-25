@@ -15,18 +15,6 @@ export class UpdateCreditCardDto {
     limitCents?: number;
 
     @IsOptional()
-    @IsInt()
-    @Min(1)
-    @Max(28)
-    closingDay?: number;
-
-    @IsOptional()
-    @IsInt()
-    @Min(1)
-    @Max(28)
-    dueDay?: number;
-
-    @IsOptional()
     @IsString()
     cardLast4?: string;
 

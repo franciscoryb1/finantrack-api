@@ -12,16 +12,6 @@ export class CreateCreditCardDto {
     @Min(1)
     limitCents: number;
 
-    @IsInt()
-    @Min(1)
-    @Max(28)
-    closingDay: number;
-
-    @IsInt()
-    @Min(1)
-    @Max(28)
-    dueDay: number;
-
     @IsString()
     cardLast4: string;
 

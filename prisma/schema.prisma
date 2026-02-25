@@ -154,8 +154,6 @@ model CreditCard {
   name          String
   brand         CreditCardBrand? // opcional
   limitCents    Int
-  closingDay    Int              // 1-28
-  dueDay        Int              // 1-28
 
   cardLast4     String
   cardExpiresAt DateTime
