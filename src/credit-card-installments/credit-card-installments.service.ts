@@ -17,6 +17,7 @@ export class InstallmentsService {
                 name: true,
                 brand: true,
                 limitCents: true,
+                backgroundColor: true,
             },
             orderBy: { createdAt: 'desc' },
         });
@@ -117,6 +118,7 @@ export class InstallmentsService {
                 name: card.name,
                 brand: card.brand ?? null,
                 limitCents: card.limitCents,
+                backgroundColor: card.backgroundColor,
 
                 committedCents,
                 availableCents: card.limitCents - committedCents,

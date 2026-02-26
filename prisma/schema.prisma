@@ -158,6 +158,8 @@ model CreditCard {
   cardLast4     String
   cardExpiresAt DateTime
 
+  backgroundColor String? @default("#ffffff")
+
   isActive      Boolean          @default(true)
 
   createdAt     DateTime         @default(now())
