@@ -1,4 +1,4 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { InstallmentsService } from './credit-card-installments.service';
 import { InstallmentsOverviewResponseDto } from './dto/installments-overview.dto';
@@ -11,5 +11,31 @@ export class InstallmentsController {
     @Get('overview')
     overview(@Req() req: any): Promise<InstallmentsOverviewResponseDto> {
         return this.service.getOverview(req.user.userId);
+    }
+
+    @Get('card/:cardId/period')
+    getCardPeriod(
+        @Req() req: any,
+        @Param('cardId', ParseIntPipe) cardId: number,
+        @Query('year') year?: number,
+        @Query('month') month?: number,
+    ) {
+        return this.service.getCardPeriodDetail(
+            req.user.userId,
+            cardId,
+            year,
+            month,
+        );
+    }
+
+    @Get('card/:cardId/periods')
+    getCardPeriods(
+        @Req() req: any,
+        @Param('cardId', ParseIntPipe) cardId: number,
+    ) {
+        return this.service.getCardPeriods(
+            req.user.userId,
+            cardId,
+        );
     }
 }
