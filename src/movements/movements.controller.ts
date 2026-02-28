@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuard
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MovementsService } from './movements.service';
 import { CreateMovementDto } from './dto/create-movement.dto';
+import { GetMovementsSummaryDto } from './dto/get-movements-summary.dto';
 import { ListMovementsDto } from './dto/list-movements.dto';
 import { UpdateMovementDto } from './dto/update-movement.dto';
 
@@ -18,6 +19,11 @@ export class MovementsController {
     @Get()
     list(@Req() req: any, @Query() query: ListMovementsDto) {
         return this.service.listMovements(req.user.userId, query);
+    }
+
+    @Get('summary')
+    getSummary(@Req() req: any, @Query() query: GetMovementsSummaryDto) {
+        return this.service.getMovementsSummary(req.user.userId, query);
     }
 
     @Get(':id')

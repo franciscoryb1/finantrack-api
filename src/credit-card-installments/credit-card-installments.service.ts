@@ -155,7 +155,7 @@ export class InstallmentsService {
 
         const card = await this.prisma.creditCard.findFirst({
             where: { id: cardId, userId },
-            select: { id: true, name: true, limitCents: true },
+            select: { id: true, name: true, limitCents: true, backgroundColor: true },
         });
 
         if (!card) throw new Error('Card not found');

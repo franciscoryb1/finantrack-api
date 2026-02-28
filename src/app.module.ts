@@ -12,6 +12,7 @@ import { CreditCardPurchasesModule } from './credit-card-purchases/credit-card-p
 import { CreditCardStatementsModule } from './credit-card-statements/credit-card-statements.module';
 import { ConfigModule } from '@nestjs/config';
 import { InstallmentsModule } from './credit-card-installments/credit-card-installments.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { InstallmentsModule } from './credit-card-installments/credit-card-insta
     CreditCardPurchasesModule,
     CreditCardStatementsModule,
     InstallmentsModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

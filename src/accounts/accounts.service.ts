@@ -31,7 +31,7 @@ export class AccountsService {
 
     // LIST
     async listAccounts(userId: number, query: ListAccountsDto) {
-        const { status } = query;
+        const { status, type } = query;
 
         let isActiveFilter: boolean | undefined;
 
@@ -52,6 +52,7 @@ export class AccountsService {
             where: {
                 userId,
                 ...(isActiveFilter !== undefined && { isActive: isActiveFilter }),
+                ...(type && { type }),
             },
             orderBy: {
                 createdAt: 'asc',

@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMovementDto } from './dto/create-movement.dto';
+import { GetMovementsSummaryDto } from './dto/get-movements-summary.dto';
 import { ListMovementsDto } from './dto/list-movements.dto';
 import { UpdateMovementDto } from './dto/update-movement.dto';
 import { MovementType } from '@prisma/client';
@@ -67,6 +68,41 @@ export class MovementsService {
 
             return movement;
         });
+    }
+
+    async getMovementsSummary(userId: number, dto: GetMovementsSummaryDto) {
+        const { fromDate, toDate, accountId } = dto;
+
+        const where: any = { userId, isDeleted: false };
+
+        if (accountId) where.accountId = accountId;
+
+        if (fromDate || toDate) {
+            where.occurredAt = {};
+            if (fromDate) where.occurredAt.gte = new Date(fromDate);
+            if (toDate) where.occurredAt.lte = new Date(toDate);
+        }
+
+        const result = await this.prisma.movement.groupBy({
+            by: ['type'],
+            where,
+            _sum: { amountCents: true },
+            _count: true,
+        });
+
+        const income = result.find(r => r.type === MovementType.INCOME);
+        const expense = result.find(r => r.type === MovementType.EXPENSE);
+
+        const totalIncomeCents = income?._sum.amountCents ?? 0;
+        const totalExpenseCents = expense?._sum.amountCents ?? 0;
+        const movementsCount = (income?._count ?? 0) + (expense?._count ?? 0);
+
+        return {
+            totalIncomeCents,
+            totalExpenseCents,
+            netBalanceCents: totalIncomeCents - totalExpenseCents,
+            movementsCount,
+        };
     }
 
     async listMovements(userId: number, query: ListMovementsDto) {

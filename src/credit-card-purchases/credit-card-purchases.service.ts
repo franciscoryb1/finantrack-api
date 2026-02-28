@@ -170,32 +170,30 @@ export class CreditCardPurchasesService {
                 },
             });
 
-            // generar cuotas
-            if (installmentsCount > 1) {
-                const baseAmount = Math.floor(totalAmountCents / installmentsCount);
-                const remainder = totalAmountCents % installmentsCount;
+            // generar cuotas (incluyendo compras en 1 solo pago)
+            const baseAmount = Math.floor(totalAmountCents / installmentsCount);
+            const remainder = totalAmountCents % installmentsCount;
 
-                const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
+            const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
 
-                for (let i = 1; i <= installmentsCount; i++) {
-                    const amount = i === 1 ? baseAmount + remainder : baseAmount;
+            for (let i = 1; i <= installmentsCount; i++) {
+                const amount = i === 1 ? baseAmount + remainder : baseAmount;
 
-                    installmentsData.push({
-                        userId,
-                        purchaseId: purchase.id,
-                        installmentNumber: i,
-                        billingCycleOffset: i - 1,
-                        amountCents: amount,
-                        status: CreditCardInstallmentStatus.PENDING,
-                        year: null,
-                        month: null,
-                    });
-                }
-
-                await tx.creditCardInstallment.createMany({
-                    data: installmentsData,
+                installmentsData.push({
+                    userId,
+                    purchaseId: purchase.id,
+                    installmentNumber: i,
+                    billingCycleOffset: i - 1,
+                    amountCents: amount,
+                    status: CreditCardInstallmentStatus.PENDING,
+                    year: null,
+                    month: null,
                 });
             }
+
+            await tx.creditCardInstallment.createMany({
+                data: installmentsData,
+            });
 
             return purchase;
         });
