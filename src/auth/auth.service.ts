@@ -10,7 +10,7 @@ export class AuthService {
     private jwtService: JwtService,
   ) { }
 
-  async register(email: string, password: string, phoneNumber: string) {
+  async register(email: string, password: string, phoneNumber?: string) {
     const existing = await this.usersService.findByEmail(email);
     if (existing) {
       throw new BadRequestException('Email already registered');

@@ -25,13 +25,13 @@ export class UsersService {
 
   async create(email: string,
     passwordHash: string,
-    phoneNumber: string) {
+    phoneNumber?: string) {
 
     const userCreated = await this.prisma.user.create({
       data: {
         email,
         passwordHash,
-        phoneNumber,
+        phoneNumber: phoneNumber || '',
       },
     });
 
