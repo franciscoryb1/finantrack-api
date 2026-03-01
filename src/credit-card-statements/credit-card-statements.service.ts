@@ -214,6 +214,7 @@ export class CreditCardStatementsService {
                             id: true,
                             amountCents: true,
                             billingCycleOffset: true,
+                            statementId: true,
                         },
                     },
                 },
@@ -223,7 +224,11 @@ export class CreditCardStatementsService {
                 purchase.installments.filter(
                     (installment) =>
                         purchase.installmentsCount > 1 &&
-                        purchase.firstStatementSequence + installment.billingCycleOffset === statement.sequenceNumber,
+                        (
+                            installment.statementId === statement.id ||
+                            (installment.statementId === null &&
+                                purchase.firstStatementSequence + installment.billingCycleOffset === statement.sequenceNumber)
+                        ),
                 ),
             );
 
