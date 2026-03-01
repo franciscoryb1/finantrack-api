@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(netstat:*)",
+      "Bash(curl:*)",
+      "Bash(__NEW_LINE_938f8518b9ee0fdc__ curl:*)",
+      "Bash(__NEW_LINE_7bf9d7ae44232c98__ curl:*)",
+      "Bash(__NEW_LINE_cbbe460cb552cdbc__ echo:*)",
+      "Bash(npx prisma:*)",
+      "Bash(PGPASSWORD=finances_pass psql:*)",
+      "Bash(npx shadcn@latest:*)",
+      "Bash(npx tsc:*)",
+      "Bash(xargs cat:*)",
+      "Bash(node:*)"
+    ]
+  }
+}

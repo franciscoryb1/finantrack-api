@@ -13,39 +13,65 @@ export class CategoriesService {
     constructor(private readonly prisma: PrismaService) { }
 
     async listCategories(userId: number, includeInactive = false) {
+        const activeFilter = includeInactive ? {} : { isActive: true };
+
         return this.prisma.category.findMany({
             where: {
-                OR: [
-                    { userId: null },       // globales
-                    { userId },             // del usuario
-                ],
-                ...(includeInactive ? {} : { isActive: true }),
+                OR: [{ userId: null }, { userId }],
+                parentId: null,
+                ...activeFilter,
+            },
+            include: {
+                children: {
+                    where: {
+                        OR: [{ userId: null }, { userId }],
+                        ...activeFilter,
+                    },
+                    orderBy: { name: 'asc' },
+                },
             },
             orderBy: [{ userId: 'asc' }, { name: 'asc' }],
         });
     }
 
     async createCategory(userId: number, dto: CreateCategoryDto) {
-        const { name, type } = dto;
+        const { name, parentId } = dto;
+        let { type } = dto;
 
-        // Verificar duplicado por usuario
+        if (parentId) {
+            const parent = await this.prisma.category.findFirst({
+                where: {
+                    id: parentId,
+                    OR: [{ userId }, { userId: null }],
+                    isActive: true,
+                },
+            });
+
+            if (!parent) {
+                throw new BadRequestException('Parent category not found or not accessible');
+            }
+
+            if (parent.parentId !== null) {
+                throw new BadRequestException('Cannot create subcategory of a subcategory (max 2 levels)');
+            }
+
+            type = parent.type;
+        }
+
+        if (!type) {
+            throw new BadRequestException('type is required for root categories');
+        }
+
         const exists = await this.prisma.category.findFirst({
-            where: {
-                name,
-                userId,
-            },
+            where: { name, userId, parentId: parentId ?? null },
         });
 
         if (exists) {
-            throw new BadRequestException('Category already exists');
+            throw new BadRequestException('Category already exists at this level');
         }
 
         return this.prisma.category.create({
-            data: {
-                name,
-                type,
-                userId,
-            },
+            data: { name, type, userId, parentId: parentId ?? null },
         });
     }
 
@@ -68,9 +94,7 @@ export class CategoriesService {
 
         return this.prisma.category.update({
             where: { id: categoryId },
-            data: {
-                name: dto.name,
-            },
+            data: { name: dto.name },
         });
     }
 
@@ -99,9 +123,23 @@ export class CategoriesService {
             throw new ForbiddenException('You do not own this category');
         }
 
-        return this.prisma.category.update({
+        await this.prisma.$transaction([
+            this.prisma.category.update({
+                where: { id: categoryId },
+                data: { isActive },
+            }),
+            // Cascada a subcategorías del usuario
+            this.prisma.category.updateMany({
+                where: { parentId: categoryId, userId },
+                data: { isActive },
+            }),
+        ]);
+
+        return this.prisma.category.findUnique({
             where: { id: categoryId },
-            data: { isActive },
+            include: {
+                children: { where: { userId } },
+            },
         });
     }
 }

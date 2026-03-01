@@ -81,17 +81,21 @@ model Category {
   name      String
   type      CategoryType
   userId    Int?
+  parentId  Int?
   isActive  Boolean      @default(true)
 
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
   user      User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Category?    @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  Category[]   @relation("CategoryHierarchy")
   movements Movement[]
   creditCardPurchases CreditCardPurchase[]
 
-  @@unique([name, userId])
+  @@unique([name, userId, parentId])
   @@index([userId])
+  @@index([parentId])
 }
 
 
