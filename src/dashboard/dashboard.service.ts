@@ -8,7 +8,8 @@ export type DashboardActivityItem = {
     kind: ActivityKind;
     id: number;
     description: string | null;
-    occurredAt: string;
+    occurredAt: string;       // Para movimientos: fecha real. Para cuotas: primer día del mes del resumen.
+    purchaseDate: string | null; // Solo para cuotas: fecha original de la compra.
     amountCents: number;
     type: 'INCOME' | 'EXPENSE';
     category: { id: number; name: string } | null;
@@ -51,7 +52,12 @@ export class DashboardService {
         if (statements.length > 0) {
             // Mapa: creditCardId → sequenceNumber del statement de este período
             const sequenceMap = new Map<number, number>();
-            statements.forEach(s => sequenceMap.set(s.creditCardId, s.sequenceNumber));
+            // Mapa: statementId → creditCardId (para matching por statementId directo)
+            const statementIdSet = new Set<number>();
+            statements.forEach(s => {
+                sequenceMap.set(s.creditCardId, s.sequenceNumber);
+                statementIdSet.add(s.id);
+            });
 
             const cardIds = statements.map(s => s.creditCardId);
 
@@ -64,7 +70,12 @@ export class DashboardService {
                         creditCardId: { in: cardIds },
                     },
                 },
-                include: {
+                select: {
+                    id: true,
+                    statementId: true,
+                    billingCycleOffset: true,
+                    installmentNumber: true,
+                    amountCents: true,
                     purchase: {
                         include: {
                             creditCard: {
@@ -81,6 +92,7 @@ export class DashboardService {
                 if (stmtSequence === undefined) continue;
 
                 const belongsToPeriod =
+                    (inst.statementId !== null && statementIdSet.has(inst.statementId)) ||
                     inst.purchase.firstStatementSequence + inst.billingCycleOffset === stmtSequence;
 
                 if (!belongsToPeriod) continue;
@@ -89,7 +101,9 @@ export class DashboardService {
                     kind: 'CREDIT_CARD_INSTALLMENT',
                     id: inst.id,
                     description: inst.purchase.description,
-                    occurredAt: inst.purchase.occurredAt.toISOString(),
+                    // Fecha del resumen para que el item quede ordenado dentro del período correcto
+                    occurredAt: new Date(Date.UTC(year, month - 1, 1)).toISOString(),
+                    purchaseDate: inst.purchase.occurredAt.toISOString(),
                     amountCents: inst.amountCents,
                     type: 'EXPENSE',
                     category: inst.purchase.category ?? null,
@@ -109,6 +123,7 @@ export class DashboardService {
             id: m.id,
             description: m.description,
             occurredAt: m.occurredAt.toISOString(),
+            purchaseDate: null,
             amountCents: m.amountCents,
             type: m.type === MovementType.INCOME ? 'INCOME' : 'EXPENSE',
             category: m.category ?? null,
