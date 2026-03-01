@@ -7,8 +7,29 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
-import { CategoryType, CreditCardInstallmentStatus } from '@prisma/client';
+import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
+import { CategoryType, CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
+
+function toDateOnly(date: Date): Date {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function computeInstallmentMonths(
+    firstYear: number,
+    firstMonth: number,
+    count: number,
+): Array<{ year: number; month: number }> {
+    const result: Array<{ year: number; month: number }> = [];
+    for (let i = 0; i < count; i++) {
+        const totalMonths = firstYear * 12 + (firstMonth - 1) + i;
+        result.push({
+            year: Math.floor(totalMonths / 12),
+            month: (totalMonths % 12) + 1,
+        });
+    }
+    return result;
+}
 
 @Injectable()
 export class CreditCardPurchasesService {
@@ -120,31 +141,26 @@ export class CreditCardPurchasesService {
             }
 
 
-            // busco el último statement de la tarjeta
-            // busco un statement OPEN
+            // Buscar el statement OPEN que contenga el timestamp exacto de la compra.
+            // Usamos el timestamp real (no date-only) para evitar problemas de zona horaria:
+            // los statements se guardan como medianoche local (ej: 03:00 UTC para UTC-3),
+            // y la compra puede ser posterior en el mismo día UTC.
             const openStatement = await tx.creditCardStatement.findFirst({
                 where: {
                     creditCardId,
                     status: 'OPEN',
+                    periodStartDate: { lte: occurredDate },
+                    closingDate: { gt: occurredDate },
                 },
+                orderBy: { periodStartDate: 'desc' },
             });
 
             let firstStatementSequence: number;
 
             if (openStatement) {
-                // valido si la compra cae dentro del período del statement
-                if (
-                    occurredDate < openStatement.periodStartDate ||
-                    occurredDate >= openStatement.closingDate
-                ) {
-                    throw new BadRequestException(
-                        'Purchase date is outside the open statement period',
-                    );
-                }
-
                 firstStatementSequence = openStatement.sequenceNumber;
             } else {
-                // no hay statement abierto → empieza en el próximo
+                // no hay statement abierto que cubra esta fecha → empieza en el próximo
                 const lastStatement = await tx.creditCardStatement.findFirst({
                     where: { creditCardId },
                     orderBy: { sequenceNumber: 'desc' },
@@ -201,6 +217,191 @@ export class CreditCardPurchasesService {
 
 
 
+    async importLegacy(userId: number, dto: ImportLegacyPurchaseDto) {
+        const {
+            creditCardId,
+            categoryId,
+            totalAmountCents,
+            installmentsCount,
+            paidInstallmentsCount,
+            occurredAt,
+            description,
+            firstStatementYear,
+            firstStatementMonth,
+        } = dto;
+
+        if (paidInstallmentsCount >= installmentsCount) {
+            throw new BadRequestException(
+                'paidInstallmentsCount must be less than installmentsCount',
+            );
+        }
+
+        await this.validateCategory(userId, categoryId);
+        const creditCard = await this.validateCard(userId, creditCardId);
+
+        const baseAmount = Math.floor(totalAmountCents / installmentsCount);
+        const remainder = totalAmountCents % installmentsCount;
+
+        const installmentMonths = computeInstallmentMonths(
+            firstStatementYear,
+            firstStatementMonth,
+            installmentsCount,
+        );
+
+        return this.prisma.$transaction(async (tx) => {
+            // ── 1. Verificar límite de crédito (solo cuotas pendientes) ──
+            let pendingAmountCents = 0;
+            for (let i = paidInstallmentsCount + 1; i <= installmentsCount; i++) {
+                pendingAmountCents += i === 1 ? baseAmount + remainder : baseAmount;
+            }
+
+            const committed = await tx.creditCardInstallment.aggregate({
+                where: {
+                    purchase: { userId, creditCardId },
+                    status: { in: ['PENDING', 'BILLED'] },
+                },
+                _sum: { amountCents: true },
+            });
+
+            if ((committed._sum.amountCents ?? 0) + pendingAmountCents > creditCard.limitCents) {
+                throw new BadRequestException('Credit card limit exceeded');
+            }
+
+            // ── 2. Buscar o crear el statement de cada cuota ──
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth() + 1;
+
+            const statementByKey = new Map<string, { id: number; sequenceNumber: number; status: string; closingDate: Date }>();
+
+            for (const { year, month } of installmentMonths) {
+                const key = `${year}-${month}`;
+                if (statementByKey.has(key)) continue;
+
+                let stmt = await tx.creditCardStatement.findUnique({
+                    where: { creditCardId_year_month: { creditCardId, year, month } },
+                    select: { id: true, sequenceNumber: true, status: true, closingDate: true },
+                });
+
+                if (!stmt) {
+                    const lastStmt = await tx.creditCardStatement.findFirst({
+                        where: { creditCardId },
+                        orderBy: { sequenceNumber: 'desc' },
+                        select: { sequenceNumber: true },
+                    });
+
+                    const nextSeq = lastStmt ? lastStmt.sequenceNumber + 1 : 1;
+
+                    const isPast =
+                        year < currentYear ||
+                        (year === currentYear && month < currentMonth);
+
+                    // periodStartDate = closingDate del mes anterior si existe, sino día 1
+                    const prevTotalMonths = year * 12 + (month - 1) - 1;
+                    const prevYear = Math.floor(prevTotalMonths / 12);
+                    const prevMonth = (prevTotalMonths % 12) + 1;
+                    const prevStmt =
+                        statementByKey.get(`${prevYear}-${prevMonth}`) ??
+                        await tx.creditCardStatement.findUnique({
+                            where: { creditCardId_year_month: { creditCardId, year: prevYear, month: prevMonth } },
+                            select: { closingDate: true },
+                        });
+
+                    const periodStartDate = prevStmt
+                        ? new Date(prevStmt.closingDate)
+                        : new Date(year, month - 1, 1);
+
+                    const closingDate = new Date(year, month, 0); // último día del mes
+                    const dueDate = new Date(closingDate);
+                    dueDate.setDate(dueDate.getDate() + 5);
+
+                    stmt = await tx.creditCardStatement.create({
+                        data: {
+                            userId,
+                            creditCardId,
+                            sequenceNumber: nextSeq,
+                            year,
+                            month,
+                            periodStartDate,
+                            closingDate,
+                            dueDate,
+                            status: isPast
+                                ? CreditCardStatementStatus.PAID
+                                : CreditCardStatementStatus.OPEN,
+                            totalCents: 0,
+                        },
+                        select: { id: true, sequenceNumber: true, status: true, closingDate: true },
+                    });
+                }
+
+                statementByKey.set(key, stmt);
+            }
+
+            // ── 3. firstStatementSequence ──
+            const { year: fy, month: fm } = installmentMonths[0];
+            const firstStatementSequence = statementByKey.get(`${fy}-${fm}`)!.sequenceNumber;
+
+            // ── 4. Crear la compra ──
+            const purchase = await tx.creditCardPurchase.create({
+                data: {
+                    userId,
+                    creditCardId,
+                    categoryId,
+                    totalAmountCents,
+                    installmentsCount,
+                    occurredAt: new Date(occurredAt),
+                    description,
+                    firstStatementSequence,
+                },
+            });
+
+            // ── 5. Crear cuotas ──
+            const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
+            const paidTotalByKey = new Map<string, number>();
+
+            for (let i = 1; i <= installmentsCount; i++) {
+                const amount = i === 1 ? baseAmount + remainder : baseAmount;
+                const isPaid = i <= paidInstallmentsCount;
+                const { year, month } = installmentMonths[i - 1];
+                const key = `${year}-${month}`;
+                const stmt = statementByKey.get(key)!;
+
+                installmentsData.push({
+                    userId,
+                    purchaseId: purchase.id,
+                    installmentNumber: i,
+                    billingCycleOffset: i - 1,
+                    amountCents: amount,
+                    status: isPaid
+                        ? CreditCardInstallmentStatus.PAID
+                        : CreditCardInstallmentStatus.PENDING,
+                    statementId: stmt.id,
+                    year,
+                    month,
+                });
+
+                if (isPaid) {
+                    paidTotalByKey.set(key, (paidTotalByKey.get(key) ?? 0) + amount);
+                }
+            }
+
+            await tx.creditCardInstallment.createMany({ data: installmentsData });
+
+            // ── 6. Actualizar totalCents en los statements PAID auto-generados ──
+            for (const [key, total] of paidTotalByKey) {
+                const stmt = statementByKey.get(key)!;
+                if (stmt.status === CreditCardStatementStatus.PAID) {
+                    await tx.creditCardStatement.update({
+                        where: { id: stmt.id },
+                        data: { totalCents: total },
+                    });
+                }
+            }
+
+            return purchase;
+        });
+    }
+
     async update(userId: number, purchaseId: number, dto: UpdatePurchaseDto) {
         const purchase = await this.prisma.creditCardPurchase.findUnique({
             where: { id: purchaseId },
@@ -251,26 +452,20 @@ export class CreditCardPurchasesService {
 
                 const occurredDate = updated.occurredAt;
 
-                // 🔹 recalcular firstStatementSequence
+                // 🔹 recalcular firstStatementSequence (mismo criterio que create)
                 const openStatement = await tx.creditCardStatement.findFirst({
                     where: {
                         creditCardId: updated.creditCardId,
                         status: 'OPEN',
+                        periodStartDate: { lte: occurredDate },
+                        closingDate: { gt: occurredDate },
                     },
+                    orderBy: { periodStartDate: 'desc' },
                 });
 
                 let firstStatementSequence: number;
 
                 if (openStatement) {
-                    if (
-                        occurredDate < openStatement.periodStartDate ||
-                        occurredDate >= openStatement.closingDate
-                    ) {
-                        throw new BadRequestException(
-                            'Purchase date is outside the open statement period',
-                        );
-                    }
-
                     firstStatementSequence = openStatement.sequenceNumber;
                 } else {
                     const lastStatement = await tx.creditCardStatement.findFirst({
