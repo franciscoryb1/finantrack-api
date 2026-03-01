@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreditCardPurchasesService } from './credit-card-purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
+import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
 
 @Controller('credit-card-purchases')
 @UseGuards(JwtAuthGuard)
@@ -31,6 +32,11 @@ export class CreditCardPurchasesController {
     @Post()
     create(@Req() req: any, @Body() dto: CreatePurchaseDto) {
         return this.service.create(req.user.userId, dto);
+    }
+
+    @Post('legacy-import')
+    importLegacy(@Req() req: any, @Body() dto: ImportLegacyPurchaseDto) {
+        return this.service.importLegacy(req.user.userId, dto);
     }
 
     @Patch(':id')
