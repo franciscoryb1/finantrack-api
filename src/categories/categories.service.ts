@@ -71,7 +71,7 @@ export class CategoriesService {
         }
 
         return this.prisma.category.create({
-            data: { name, type, userId, parentId: parentId ?? null },
+            data: { name, type, color: dto.color ?? null, userId, parentId: parentId ?? null },
         });
     }
 
@@ -94,7 +94,10 @@ export class CategoriesService {
 
         return this.prisma.category.update({
             where: { id: categoryId },
-            data: { name: dto.name },
+            data: {
+                ...(dto.name !== undefined && { name: dto.name }),
+                ...(dto.color !== undefined && { color: dto.color }),
+            },
         });
     }
 

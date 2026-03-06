@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { IsEnum, IsHexColor, IsInt, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 import { CategoryType } from '@prisma/client';
 
 export class CreateCategoryDto {
@@ -14,4 +14,8 @@ export class CreateCategoryDto {
     @IsOptional()
     @IsInt()
     parentId?: number;
+
+    @IsOptional()
+    @IsHexColor()
+    color?: string;
 }
