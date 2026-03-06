@@ -64,6 +64,8 @@ export class UsersService {
     return {
       id: user.id,
       email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
       phoneNumber: user.phoneNumber,
       createdAt: user.createdAt,
     };
@@ -87,6 +89,8 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
+        ...(dto.firstName !== undefined && { firstName: dto.firstName || null }),
+        ...(dto.lastName !== undefined && { lastName: dto.lastName || null }),
         ...(dto.email && { email: dto.email }),
         ...(dto.phoneNumber !== undefined && { phoneNumber: dto.phoneNumber }),
       },
@@ -95,6 +99,8 @@ export class UsersService {
     return {
       id: user.id,
       email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
       phoneNumber: user.phoneNumber,
       createdAt: user.createdAt,
     };

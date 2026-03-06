@@ -36,6 +36,8 @@ model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique
   passwordHash String
+  firstName    String?
+  lastName     String?
   phoneNumber  String @unique @db.VarChar(20)
   isActive     Boolean  @default(true)
 
@@ -81,6 +83,7 @@ model Category {
   name      String
   type      CategoryType
   color     String?
+
   userId    Int?
   parentId  Int?
   isActive  Boolean      @default(true)
