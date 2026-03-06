@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { ListAccountsDto } from './dto/list-accounts.dto';
+import { UpdateAccountDto } from './dto/update-account.dto';
 
 @Controller('accounts')
 @UseGuards(JwtAuthGuard)
@@ -29,6 +30,12 @@ export class AccountsController {
     listAccounts(@Req() req: any, @Query() query: ListAccountsDto) {
         const userId = req.user.userId;
         return this.accountsService.listAccounts(userId, query);
+    }
+
+    @Patch(':id')
+    updateAccount(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateAccountDto) {
+        const userId = req.user.userId;
+        return this.accountsService.updateAccount(userId, Number(id), dto);
     }
 
     @Patch(':id/deactivate')

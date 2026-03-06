@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { ListAccountsDto } from './dto/list-accounts.dto';
+import { UpdateAccountDto } from './dto/update-account.dto';
 
 @Injectable()
 export class AccountsService {
@@ -57,6 +58,22 @@ export class AccountsService {
             orderBy: {
                 createdAt: 'asc',
             },
+        });
+    }
+
+    // UPDATE
+    async updateAccount(userId: number, accountId: number, dto: UpdateAccountDto) {
+        const account = await this.prisma.account.findUnique({
+            where: { id: accountId },
+        });
+
+        if (!account || account.userId !== userId) {
+            throw new ForbiddenException('Account not found');
+        }
+
+        return this.prisma.account.update({
+            where: { id: accountId },
+            data: { name: dto.name },
         });
     }
 
