@@ -8,11 +8,12 @@ export type DashboardActivityItem = {
     kind: ActivityKind;
     id: number;
     description: string | null;
-    occurredAt: string;       // Para movimientos: fecha real. Para cuotas: primer día del mes del resumen.
+    occurredAt: string;          // Para movimientos: fecha real. Para cuotas: primer día del mes del resumen.
     purchaseDate: string | null; // Solo para cuotas: fecha original de la compra.
+    registeredAt: string;        // Fecha de creación del registro (movement.createdAt o purchase.createdAt).
     amountCents: number;
     type: 'INCOME' | 'EXPENSE';
-    category: { id: number; name: string } | null;
+    category: { id: number; name: string; parent: { id: number; name: string } | null } | null;
     account: { id: number; name: string; type: string } | null;
     creditCard: { id: number; name: string; brand: string | null; cardLast4: string } | null;
     installmentInfo: { installmentNumber: number; installmentsCount: number } | null;
@@ -35,7 +36,7 @@ export class DashboardService {
             },
             include: {
                 account: { select: { id: true, name: true, type: true } },
-                category: { select: { id: true, name: true } },
+                category: { select: { id: true, name: true, parent: { select: { id: true, name: true } } } },
             },
             orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         });
@@ -81,7 +82,7 @@ export class DashboardService {
                             creditCard: {
                                 select: { id: true, name: true, brand: true, cardLast4: true },
                             },
-                            category: { select: { id: true, name: true } },
+                            category: { select: { id: true, name: true, parent: { select: { id: true, name: true } } } },
                         },
                     },
                 },
@@ -104,6 +105,7 @@ export class DashboardService {
                     // Fecha del resumen para que el item quede ordenado dentro del período correcto
                     occurredAt: new Date(Date.UTC(year, month - 1, 1)).toISOString(),
                     purchaseDate: inst.purchase.occurredAt.toISOString(),
+                    registeredAt: inst.purchase.createdAt.toISOString(),
                     amountCents: inst.amountCents,
                     type: 'EXPENSE',
                     category: inst.purchase.category ?? null,
@@ -124,6 +126,7 @@ export class DashboardService {
             description: m.description,
             occurredAt: m.occurredAt.toISOString(),
             purchaseDate: null,
+            registeredAt: m.createdAt.toISOString(),
             amountCents: m.amountCents,
             type: m.type === MovementType.INCOME ? 'INCOME' : 'EXPENSE',
             category: m.category ?? null,
