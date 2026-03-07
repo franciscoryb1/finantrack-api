@@ -16,6 +16,8 @@ enum MovementType {
   INCOME
   EXPENSE
   STATEMENT_PAYMENT
+  TRANSFER_OUT
+  TRANSFER_IN
 }
 
 enum AccountType {
@@ -57,6 +59,7 @@ model User {
   creditCardInstallments  CreditCardInstallment[]
   creditCardStatements    CreditCardStatement[]
   creditCardPayments      CreditCardPayment[]
+  accountTransfers        AccountTransfer[]
 }
 
 model Account {
@@ -75,6 +78,8 @@ model Account {
 
   creditCardsAsBank    CreditCard[] @relation("AccountAsBankForCards")
   creditCardPayments   CreditCardPayment[]
+  transfersFrom        AccountTransfer[] @relation("TransferFromAccount")
+  transfersTo          AccountTransfer[] @relation("TransferToAccount")
 
   @@index([userId])
 }
@@ -125,6 +130,8 @@ model Movement {
   account     Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
   category    Category?    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   creditCardPayment CreditCardPayment?
+  transferOut AccountTransfer? @relation("TransferFromMovement")
+  transferIn  AccountTransfer? @relation("TransferToMovement")
 
   @@index([userId, occurredAt])
   @@index([userId, isDeleted])
@@ -291,4 +298,28 @@ model CreditCardPayment {
   @@index([userId])
   @@index([statementId])
   @@index([paidFromAccountId])
+}
+
+model AccountTransfer {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  fromAccountId   Int
+  toAccountId     Int
+  amountCents     Int
+  description     String?
+  transferredAt   DateTime
+  fromMovementId  Int      @unique
+  toMovementId    Int      @unique
+
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromAccount     Account  @relation("TransferFromAccount", fields: [fromAccountId], references: [id], onDelete: Restrict)
+  toAccount       Account  @relation("TransferToAccount", fields: [toAccountId], references: [id], onDelete: Restrict)
+  fromMovement    Movement @relation("TransferFromMovement", fields: [fromMovementId], references: [id], onDelete: Restrict)
+  toMovement      Movement @relation("TransferToMovement", fields: [toMovementId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([fromAccountId])
+  @@index([toAccountId])
 }

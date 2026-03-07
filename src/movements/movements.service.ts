@@ -11,9 +11,8 @@ export class MovementsService {
     constructor(private readonly prisma: PrismaService) { }
 
     private applyDelta(balance: number, type: MovementType, amountCents: number) {
-        if (type === MovementType.INCOME) return balance + amountCents;
-        if (type === MovementType.EXPENSE) return balance - amountCents;
-        if (type === MovementType.STATEMENT_PAYMENT) return balance - amountCents;
+        if (type === MovementType.INCOME || type === MovementType.TRANSFER_IN) return balance + amountCents;
+        if (type === MovementType.EXPENSE || type === MovementType.STATEMENT_PAYMENT || type === MovementType.TRANSFER_OUT) return balance - amountCents;
         return balance;
     }
 
@@ -77,7 +76,7 @@ export class MovementsService {
         const where: any = {
             userId,
             isDeleted: false,
-            type: { in: [MovementType.INCOME, MovementType.EXPENSE] },
+            type: { in: [MovementType.INCOME, MovementType.EXPENSE] }, // excludes STATEMENT_PAYMENT, TRANSFER_OUT, TRANSFER_IN
         };
 
         if (accountId) where.accountId = accountId;
@@ -192,10 +191,10 @@ export class MovementsService {
             if (!account) throw new ForbiddenException('Account not found');
 
             // Revertir efecto
-            const revertedBalance =
-                movement.type === MovementType.INCOME
-                    ? account.currentBalanceCents - movement.amountCents
-                    : account.currentBalanceCents + movement.amountCents; // EXPENSE y STATEMENT_PAYMENT se revierten igual
+            const adds = movement.type === MovementType.INCOME || movement.type === MovementType.TRANSFER_IN;
+            const revertedBalance = adds
+                ? account.currentBalanceCents - movement.amountCents
+                : account.currentBalanceCents + movement.amountCents; // EXPENSE, STATEMENT_PAYMENT, TRANSFER_OUT
 
             this.ensureNonNegative(revertedBalance);
 

@@ -9,7 +9,7 @@ export class CreateMovementDto {
     @IsInt()
     categoryId?: number;
 
-    @IsIn([MovementType.INCOME, MovementType.EXPENSE])
+    @IsIn([MovementType.INCOME, MovementType.EXPENSE]) // STATEMENT_PAYMENT, TRANSFER_OUT, TRANSFER_IN are system-only
     type: MovementType;
 
     @IsInt()

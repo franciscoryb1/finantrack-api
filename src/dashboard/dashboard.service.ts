@@ -12,7 +12,7 @@ export type DashboardActivityItem = {
     purchaseDate: string | null; // Solo para cuotas: fecha original de la compra.
     registeredAt: string;        // Fecha de creación del registro (movement.createdAt o purchase.createdAt).
     amountCents: number;
-    type: 'INCOME' | 'EXPENSE' | 'STATEMENT_PAYMENT';
+    type: 'INCOME' | 'EXPENSE' | 'STATEMENT_PAYMENT' | 'TRANSFER_OUT' | 'TRANSFER_IN';
     category: { id: number; name: string; color: string | null; parent: { id: number; name: string; color: string | null } | null } | null;
     account: { id: number; name: string; type: string } | null;
     creditCard: { id: number; name: string; brand: string | null; cardLast4: string } | null;
@@ -128,7 +128,11 @@ export class DashboardService {
             purchaseDate: null,
             registeredAt: m.createdAt.toISOString(),
             amountCents: m.amountCents,
-            type: m.type === MovementType.INCOME ? 'INCOME' : m.type === MovementType.STATEMENT_PAYMENT ? 'STATEMENT_PAYMENT' : 'EXPENSE',
+            type: m.type === MovementType.INCOME ? 'INCOME'
+                : m.type === MovementType.STATEMENT_PAYMENT ? 'STATEMENT_PAYMENT'
+                : m.type === MovementType.TRANSFER_OUT ? 'TRANSFER_OUT'
+                : m.type === MovementType.TRANSFER_IN ? 'TRANSFER_IN'
+                : 'EXPENSE',
             category: m.category ?? null,
             account: m.account,
             creditCard: null,
