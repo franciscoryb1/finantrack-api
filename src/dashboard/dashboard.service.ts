@@ -13,7 +13,7 @@ export type DashboardActivityItem = {
     registeredAt: string;        // Fecha de creación del registro (movement.createdAt o purchase.createdAt).
     amountCents: number;
     type: 'INCOME' | 'EXPENSE';
-    category: { id: number; name: string; parent: { id: number; name: string } | null } | null;
+    category: { id: number; name: string; color: string | null; parent: { id: number; name: string; color: string | null } | null } | null;
     account: { id: number; name: string; type: string } | null;
     creditCard: { id: number; name: string; brand: string | null; cardLast4: string } | null;
     installmentInfo: { installmentNumber: number; installmentsCount: number } | null;
@@ -36,7 +36,7 @@ export class DashboardService {
             },
             include: {
                 account: { select: { id: true, name: true, type: true } },
-                category: { select: { id: true, name: true, parent: { select: { id: true, name: true } } } },
+                category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
             },
             orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         });
@@ -82,7 +82,7 @@ export class DashboardService {
                             creditCard: {
                                 select: { id: true, name: true, brand: true, cardLast4: true },
                             },
-                            category: { select: { id: true, name: true, parent: { select: { id: true, name: true } } } },
+                            category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
                         },
                     },
                 },

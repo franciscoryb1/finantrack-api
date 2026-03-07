@@ -188,7 +188,7 @@ export class InstallmentsService {
                 purchase: {
                     include: {
                         category: {
-                            select: { id: true, name: true, parentId: true, parent: { select: { id: true, name: true } } },
+                            select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } },
                         },
                     },
                 },
@@ -227,7 +227,10 @@ export class InstallmentsService {
                         ? {
                               id: inst.purchase.category.id,
                               name: inst.purchase.category.name,
-                              parent: inst.purchase.category.parent ?? null,
+                              color: inst.purchase.category.color ?? null,
+                              parent: inst.purchase.category.parent
+                                  ? { id: inst.purchase.category.parent.id, name: inst.purchase.category.parent.name, color: inst.purchase.category.parent.color ?? null }
+                                  : null,
                           }
                         : null,
                     installmentForThisPeriod: {
