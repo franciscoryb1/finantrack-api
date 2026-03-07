@@ -185,7 +185,13 @@ export class InstallmentsService {
                 },
             },
             include: {
-                purchase: true,
+                purchase: {
+                    include: {
+                        category: {
+                            select: { id: true, name: true, parentId: true, parent: { select: { id: true, name: true } } },
+                        },
+                    },
+                },
             },
         });
 
@@ -217,6 +223,13 @@ export class InstallmentsService {
                     occurredAt: inst.purchase.occurredAt.toISOString(),
                     installmentsRemaining:
                         inst.purchase.installmentsCount - paidCount,
+                    category: inst.purchase.category
+                        ? {
+                              id: inst.purchase.category.id,
+                              name: inst.purchase.category.name,
+                              parent: inst.purchase.category.parent ?? null,
+                          }
+                        : null,
                     installmentForThisPeriod: {
                         installmentNumber: inst.installmentNumber,
                         amountCents: inst.amountCents,
