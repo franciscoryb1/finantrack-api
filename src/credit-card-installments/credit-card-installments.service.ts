@@ -262,9 +262,17 @@ export class InstallmentsService {
                 year: true,
                 month: true,
                 status: true,
+                periodStartDate: true,
+                closingDate: true,
             },
         });
 
-        return periods;
+        return periods.map((p) => ({
+            year: p.year,
+            month: p.month,
+            status: p.status,
+            periodStartDate: p.periodStartDate.toISOString(),
+            closingDate: p.closingDate.toISOString(),
+        }));
     }
 }
