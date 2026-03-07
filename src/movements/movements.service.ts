@@ -13,6 +13,7 @@ export class MovementsService {
     private applyDelta(balance: number, type: MovementType, amountCents: number) {
         if (type === MovementType.INCOME) return balance + amountCents;
         if (type === MovementType.EXPENSE) return balance - amountCents;
+        if (type === MovementType.STATEMENT_PAYMENT) return balance - amountCents;
         return balance;
     }
 
@@ -73,7 +74,11 @@ export class MovementsService {
     async getMovementsSummary(userId: number, dto: GetMovementsSummaryDto) {
         const { fromDate, toDate, accountId } = dto;
 
-        const where: any = { userId, isDeleted: false };
+        const where: any = {
+            userId,
+            isDeleted: false,
+            type: { in: [MovementType.INCOME, MovementType.EXPENSE] },
+        };
 
         if (accountId) where.accountId = accountId;
 
@@ -190,7 +195,7 @@ export class MovementsService {
             const revertedBalance =
                 movement.type === MovementType.INCOME
                     ? account.currentBalanceCents - movement.amountCents
-                    : account.currentBalanceCents + movement.amountCents;
+                    : account.currentBalanceCents + movement.amountCents; // EXPENSE y STATEMENT_PAYMENT se revierten igual
 
             this.ensureNonNegative(revertedBalance);
 

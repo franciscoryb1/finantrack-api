@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsOptional, IsPositive, IsString, IsDateString } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsPositive, IsString, IsDateString } from 'class-validator';
 import { MovementType } from '@prisma/client';
 
 export class CreateMovementDto {
@@ -9,7 +9,7 @@ export class CreateMovementDto {
     @IsInt()
     categoryId?: number;
 
-    @IsEnum(MovementType)
+    @IsIn([MovementType.INCOME, MovementType.EXPENSE])
     type: MovementType;
 
     @IsInt()

@@ -15,6 +15,7 @@ generator client {
 enum MovementType {
   INCOME
   EXPENSE
+  STATEMENT_PAYMENT
 }
 
 enum AccountType {

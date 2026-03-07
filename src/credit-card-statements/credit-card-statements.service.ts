@@ -349,7 +349,7 @@ export class CreditCardStatementsService {
                 data: {
                     userId,
                     accountId,
-                    type: 'EXPENSE',
+                    type: 'STATEMENT_PAYMENT',
                     amountCents: statement.totalCents,
                     occurredAt: paidAt ? new Date(paidAt) : new Date(),
                     description:
