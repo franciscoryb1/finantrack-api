@@ -2,6 +2,7 @@ import {
     Injectable,
     ForbiddenException,
     BadRequestException,
+    ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAccountDto } from './dto/create-account.dto';
@@ -86,6 +87,32 @@ export class AccountsService {
         return this.changeAccountState(userId, accountId, true);
     }
 
+
+    // DELETE
+    async deleteAccount(userId: number, accountId: number) {
+        const account = await this.prisma.account.findUnique({
+            where: { id: accountId },
+            include: { _count: { select: { movements: true, creditCardsAsBank: true } } },
+        });
+
+        if (!account || account.userId !== userId) {
+            throw new ForbiddenException('Account not found');
+        }
+
+        if (account._count.movements > 0) {
+            throw new ConflictException(
+                'No se puede eliminar una cuenta con movimientos registrados. Desactivala en su lugar.',
+            );
+        }
+
+        if (account._count.creditCardsAsBank > 0) {
+            throw new ConflictException(
+                'No se puede eliminar una cuenta asociada a tarjetas de crédito.',
+            );
+        }
+
+        await this.prisma.account.delete({ where: { id: accountId } });
+    }
 
     // PRIVATE
     private async changeAccountState(

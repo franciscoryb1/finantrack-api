@@ -1,7 +1,9 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
+    HttpCode,
     Patch,
     Param,
     Post,
@@ -48,5 +50,12 @@ export class AccountsController {
     activateAccount(@Req() req: any, @Param('id') id: string) {
         const userId = req.user.userId;
         return this.accountsService.activateAccount(userId, Number(id));
+    }
+
+    @Delete(':id')
+    @HttpCode(204)
+    deleteAccount(@Req() req: any, @Param('id') id: string) {
+        const userId = req.user.userId;
+        return this.accountsService.deleteAccount(userId, Number(id));
     }
 }
