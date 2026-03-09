@@ -12,6 +12,12 @@ generator client {
 // ENUMS
 // =========================
 
+enum RecurringFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
 enum MovementType {
   INCOME
   EXPENSE
@@ -53,6 +59,7 @@ model User {
   accounts     Account[]
   categories   Category[]
   movements    Movement[]
+  recurringExpenses RecurringExpense[]
 
   creditCards             CreditCard[]
   creditCardPurchases     CreditCardPurchase[]
@@ -103,6 +110,7 @@ model Category {
   children  Category[]   @relation("CategoryHierarchy")
   movements Movement[]
   creditCardPurchases CreditCardPurchase[]
+  recurringExpenses   RecurringExpense[]
 
   @@unique([name, userId, parentId])
   @@index([userId])
@@ -132,6 +140,7 @@ model Movement {
   creditCardPayment CreditCardPayment?
   transferOut AccountTransfer? @relation("TransferFromMovement")
   transferIn  AccountTransfer? @relation("TransferToMovement")
+  recurringPayment RecurringExpensePayment?
 
   @@index([userId, occurredAt])
   @@index([userId, isDeleted])
@@ -322,4 +331,43 @@ model AccountTransfer {
   @@index([userId])
   @@index([fromAccountId])
   @@index([toAccountId])
+}
+
+model RecurringExpense {
+  id          Int                @id @default(autoincrement())
+  userId      Int
+  name        String
+  description String?
+  amountCents    Int
+  frequency      RecurringFrequency
+  dueDay         Int?               // día del mes (1-31), solo aplica para MONTHLY
+  dueDayOfWeek   Int?               // día de la semana (0=Dom..6=Sáb), solo aplica para WEEKLY/BIWEEKLY
+  startDate      DateTime
+  endDate     DateTime?
+  categoryId  Int?
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    Category?          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  payments    RecurringExpensePayment[]
+
+  @@index([userId])
+  @@index([categoryId])
+}
+
+model RecurringExpensePayment {
+  id                 Int              @id @default(autoincrement())
+  recurringExpenseId Int
+  movementId         Int              @unique
+  dueDate            DateTime
+  amountCents        Int
+  createdAt          DateTime         @default(now())
+
+  recurringExpense   RecurringExpense @relation(fields: [recurringExpenseId], references: [id], onDelete: Cascade)
+  movement           Movement         @relation(fields: [movementId], references: [id], onDelete: Restrict)
+
+  @@index([recurringExpenseId])
+  @@unique([recurringExpenseId, dueDate])
 }

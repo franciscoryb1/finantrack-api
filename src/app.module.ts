@@ -14,6 +14,7 @@ import { ConfigModule } from '@nestjs/config';
 import { InstallmentsModule } from './credit-card-installments/credit-card-installments.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AccountTransfersModule } from './account-transfers/account-transfers.module';
+import { RecurringExpensesModule } from './recurring-expenses/recurring-expenses.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { AccountTransfersModule } from './account-transfers/account-transfers.mo
     InstallmentsModule,
     DashboardModule,
     AccountTransfersModule,
+    RecurringExpensesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
