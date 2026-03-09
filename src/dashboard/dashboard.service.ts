@@ -13,6 +13,7 @@ export type DashboardActivityItem = {
     registeredAt: string;        // Fecha de creación del registro (movement.createdAt o purchase.createdAt).
     amountCents: number;
     type: 'INCOME' | 'EXPENSE' | 'STATEMENT_PAYMENT' | 'TRANSFER_OUT' | 'TRANSFER_IN';
+    isRecurring: boolean;
     category: { id: number; name: string; color: string | null; parent: { id: number; name: string; color: string | null } | null } | null;
     account: { id: number; name: string; type: string } | null;
     creditCard: { id: number; name: string; brand: string | null; cardLast4: string } | null;
@@ -37,6 +38,7 @@ export class DashboardService {
             include: {
                 account: { select: { id: true, name: true, type: true } },
                 category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
+                recurringPayment: { select: { id: true } },
             },
             orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         });
@@ -108,6 +110,7 @@ export class DashboardService {
                     registeredAt: inst.purchase.createdAt.toISOString(),
                     amountCents: inst.amountCents,
                     type: 'EXPENSE',
+                    isRecurring: false,
                     category: inst.purchase.category ?? null,
                     account: null,
                     creditCard: inst.purchase.creditCard,
@@ -133,6 +136,7 @@ export class DashboardService {
                 : m.type === MovementType.TRANSFER_OUT ? 'TRANSFER_OUT'
                 : m.type === MovementType.TRANSFER_IN ? 'TRANSFER_IN'
                 : 'EXPENSE',
+            isRecurring: !!m.recurringPayment,
             category: m.category ?? null,
             account: m.account,
             creditCard: null,

@@ -147,6 +147,7 @@ export class MovementsService {
                 include: {
                     account: { select: { id: true, name: true, type: true } },
                     category: { select: { id: true, name: true, type: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
+                    recurringPayment: { select: { id: true } },
                 },
             }),
             this.prisma.movement.count({ where }),
