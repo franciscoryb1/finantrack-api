@@ -14,10 +14,12 @@ export type DashboardActivityItem = {
     amountCents: number;
     type: 'INCOME' | 'EXPENSE' | 'STATEMENT_PAYMENT' | 'TRANSFER_OUT' | 'TRANSFER_IN';
     isRecurring: boolean;
+    tags: { id: number; name: string; color: string | null }[];
     category: { id: number; name: string; color: string | null; parent: { id: number; name: string; color: string | null } | null } | null;
     account: { id: number; name: string; type: string } | null;
     creditCard: { id: number; name: string; brand: string | null; cardLast4: string } | null;
-    installmentInfo: { installmentNumber: number; installmentsCount: number } | null;
+    installmentInfo: { installmentNumber: number; installmentsCount: number; purchaseId: number } | null;
+    transferData: { id: number; fromAccountId: number; toAccountId: number; amountCents: number; description: string | null; transferredAt: string; fromAccount: { id: number; name: string }; toAccount: { id: number; name: string } } | null;
 };
 
 @Injectable()
@@ -39,6 +41,9 @@ export class DashboardService {
                 account: { select: { id: true, name: true, type: true } },
                 category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
                 recurringPayment: { select: { id: true } },
+                tags: { select: { id: true, name: true, color: true } },
+                transferOut: { select: { id: true, fromAccountId: true, toAccountId: true, amountCents: true, description: true, transferredAt: true, fromAccount: { select: { id: true, name: true } }, toAccount: { select: { id: true, name: true } } } },
+                transferIn: { select: { id: true, fromAccountId: true, toAccountId: true, amountCents: true, description: true, transferredAt: true, fromAccount: { select: { id: true, name: true } }, toAccount: { select: { id: true, name: true } } } },
             },
             orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         });
@@ -75,6 +80,7 @@ export class DashboardService {
                 },
                 select: {
                     id: true,
+                    purchaseId: true,
                     statementId: true,
                     billingCycleOffset: true,
                     installmentNumber: true,
@@ -111,12 +117,15 @@ export class DashboardService {
                     amountCents: inst.amountCents,
                     type: 'EXPENSE',
                     isRecurring: false,
+                    tags: [],
+                    transferData: null,
                     category: inst.purchase.category ?? null,
                     account: null,
                     creditCard: inst.purchase.creditCard,
                     installmentInfo: {
                         installmentNumber: inst.installmentNumber,
                         installmentsCount: inst.purchase.installmentsCount,
+                        purchaseId: inst.purchaseId,
                     },
                 });
             }
@@ -137,10 +146,16 @@ export class DashboardService {
                 : m.type === MovementType.TRANSFER_IN ? 'TRANSFER_IN'
                 : 'EXPENSE',
             isRecurring: !!m.recurringPayment,
+            tags: m.tags,
             category: m.category ?? null,
             account: m.account,
             creditCard: null,
             installmentInfo: null,
+            transferData: m.transferOut
+                ? { ...m.transferOut, transferredAt: m.transferOut.transferredAt.toISOString() }
+                : m.transferIn
+                ? { ...m.transferIn, transferredAt: m.transferIn.transferredAt.toISOString() }
+                : null,
         }));
 
         const allItems = [...movementItems, ...installmentItems].sort(
