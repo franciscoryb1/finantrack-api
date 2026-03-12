@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransferDto } from './dto/create-transfer.dto';
+import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { MovementType } from '@prisma/client';
 
 @Injectable()
@@ -76,6 +77,58 @@ export class AccountTransfersService {
                     fromMovementId: fromMovement.id,
                     toMovementId: toMovement.id,
                 },
+                include: {
+                    fromAccount: { select: { id: true, name: true } },
+                    toAccount: { select: { id: true, name: true } },
+                },
+            });
+        });
+    }
+
+    async update(userId: number, id: number, dto: UpdateTransferDto) {
+        return this.prisma.$transaction(async (tx) => {
+            const transfer = await tx.accountTransfer.findFirst({
+                where: { id, userId },
+                include: {
+                    fromAccount: { select: { id: true, name: true, currentBalanceCents: true } },
+                    toAccount: { select: { id: true, name: true, currentBalanceCents: true } },
+                },
+            });
+
+            if (!transfer) throw new NotFoundException('Transfer not found');
+
+            const nextAmount = dto.amountCents ?? transfer.amountCents;
+            const nextDate = dto.transferredAt ? new Date(dto.transferredAt) : transfer.transferredAt;
+            const nextDescription = dto.description !== undefined ? (dto.description || null) : transfer.description;
+
+            // Recalculate balances: revert original then apply new
+            const newFromBalance = transfer.fromAccount.currentBalanceCents + transfer.amountCents - nextAmount;
+            const newToBalance = transfer.toAccount.currentBalanceCents - transfer.amountCents + nextAmount;
+
+            if (newFromBalance < 0) throw new BadRequestException('Insufficient balance');
+
+            const descOut = nextDescription ?? `Transferencia a ${transfer.toAccount.name}`;
+            const descIn = nextDescription ?? `Transferencia desde ${transfer.fromAccount.name}`;
+            const tagUpdate = dto.tagIds !== undefined
+                ? { tags: { set: dto.tagIds.map(tagId => ({ id: tagId })) } }
+                : {};
+
+            await Promise.all([
+                tx.movement.update({
+                    where: { id: transfer.fromMovementId },
+                    data: { amountCents: nextAmount, occurredAt: nextDate, description: descOut, balanceSnapshotCents: newFromBalance, ...tagUpdate },
+                }),
+                tx.movement.update({
+                    where: { id: transfer.toMovementId },
+                    data: { amountCents: nextAmount, occurredAt: nextDate, description: descIn, balanceSnapshotCents: newToBalance, ...tagUpdate },
+                }),
+                tx.account.update({ where: { id: transfer.fromAccountId }, data: { currentBalanceCents: newFromBalance } }),
+                tx.account.update({ where: { id: transfer.toAccountId }, data: { currentBalanceCents: newToBalance } }),
+            ]);
+
+            return tx.accountTransfer.update({
+                where: { id },
+                data: { amountCents: nextAmount, description: nextDescription, transferredAt: nextDate },
                 include: {
                     fromAccount: { select: { id: true, name: true } },
                     toAccount: { select: { id: true, name: true } },
