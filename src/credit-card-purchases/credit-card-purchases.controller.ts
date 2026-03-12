@@ -15,6 +15,7 @@ import { CreditCardPurchasesService } from './credit-card-purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
+import { ReassignCardDto } from './dto/reassign-card.dto';
 
 @Controller('credit-card-purchases')
 @UseGuards(JwtAuthGuard)
@@ -46,6 +47,15 @@ export class CreditCardPurchasesController {
         @Body() dto: UpdatePurchaseDto,
     ) {
         return this.service.update(req.user.userId, id, dto);
+    }
+
+    @Patch(':id/reassign-card')
+    reassignCard(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: ReassignCardDto,
+    ) {
+        return this.service.reassignCard(req.user.userId, id, dto);
     }
 
     @Delete(':id')

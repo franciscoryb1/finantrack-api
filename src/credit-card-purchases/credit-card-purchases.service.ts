@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
+import { ReassignCardDto } from './dto/reassign-card.dto';
 import { CategoryType, CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 
@@ -517,7 +518,7 @@ export class CreditCardPurchasesService {
         });
     }
 
-    async softDelete(userId: number, purchaseId: number) {
+    async reassignCard(userId: number, purchaseId: number, dto: ReassignCardDto) {
         const purchase = await this.prisma.creditCardPurchase.findUnique({
             where: { id: purchaseId },
         });
@@ -530,15 +531,100 @@ export class CreditCardPurchasesService {
             throw new ForbiddenException();
         }
 
-        if (
-            await this.hasBilledInstallments(purchaseId) ||
-            await this.hasClosedStatement(purchaseId)
-        ) {
-            throw new BadRequestException(
-                'Cannot modify purchase linked to a closed statement',
-            );
+        const newCard = await this.validateCard(userId, dto.creditCardId);
+
+        return this.prisma.$transaction(async (tx) => {
+            // 1. Borrar todas las cuotas sin importar el estado del resumen
+            await tx.creditCardInstallment.deleteMany({ where: { purchaseId } });
+
+            const occurredDate = dto.occurredAt ? new Date(dto.occurredAt) : purchase.occurredAt;
+
+            // 2. Calcular firstStatementSequence en la nueva tarjeta
+            const openStatement = await tx.creditCardStatement.findFirst({
+                where: {
+                    creditCardId: dto.creditCardId,
+                    status: 'OPEN',
+                    periodStartDate: { lte: occurredDate },
+                    closingDate: { gt: occurredDate },
+                },
+                orderBy: { periodStartDate: 'desc' },
+            });
+
+            let firstStatementSequence: number;
+
+            if (openStatement) {
+                firstStatementSequence = openStatement.sequenceNumber;
+            } else {
+                const lastStatement = await tx.creditCardStatement.findFirst({
+                    where: { creditCardId: dto.creditCardId },
+                    orderBy: { sequenceNumber: 'desc' },
+                });
+
+                firstStatementSequence = lastStatement ? lastStatement.sequenceNumber + 1 : 1;
+            }
+
+            // 3. Verificar límite de crédito en la nueva tarjeta
+            const committed = await tx.creditCardInstallment.aggregate({
+                where: {
+                    purchase: { userId, creditCardId: dto.creditCardId },
+                    status: { in: ['PENDING', 'BILLED'] },
+                },
+                _sum: { amountCents: true },
+            });
+
+            if ((committed._sum.amountCents ?? 0) + purchase.totalAmountCents > newCard.limitCents) {
+                throw new BadRequestException('Credit card limit exceeded');
+            }
+
+            // 4. Actualizar la compra
+            const updated = await tx.creditCardPurchase.update({
+                where: { id: purchaseId },
+                data: {
+                    creditCardId: dto.creditCardId,
+                    firstStatementSequence,
+                    ...(dto.occurredAt && { occurredAt: occurredDate }),
+                },
+            });
+
+            // 5. Regenerar cuotas en la nueva tarjeta
+            const { totalAmountCents, installmentsCount } = updated;
+            const baseAmount = Math.floor(totalAmountCents / installmentsCount);
+            const remainder = totalAmountCents % installmentsCount;
+
+            const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
+
+            for (let i = 1; i <= installmentsCount; i++) {
+                const amount = i === 1 ? baseAmount + remainder : baseAmount;
+                installmentsData.push({
+                    userId,
+                    purchaseId,
+                    installmentNumber: i,
+                    billingCycleOffset: i - 1,
+                    amountCents: amount,
+                    status: CreditCardInstallmentStatus.PENDING,
+                    year: null,
+                    month: null,
+                });
+            }
+
+            await tx.creditCardInstallment.createMany({ data: installmentsData });
+
+            return updated;
+        });
+    }
+
+    async softDelete(userId: number, purchaseId: number) {
+        const purchase = await this.prisma.creditCardPurchase.findUnique({
+            where: { id: purchaseId },
+        });
+
+        if (!purchase || purchase.isDeleted) {
+            throw new NotFoundException('Purchase not found');
         }
 
+        if (purchase.userId !== userId) {
+            throw new ForbiddenException();
+        }
 
         return this.prisma.$transaction(async (tx) => {
             await tx.creditCardInstallment.deleteMany({
