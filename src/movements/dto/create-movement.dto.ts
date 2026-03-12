@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, IsPositive, IsString, IsDateString } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsOptional, IsPositive, IsString, IsDateString } from 'class-validator';
 import { MovementType } from '@prisma/client';
 
 export class CreateMovementDto {
@@ -22,4 +22,9 @@ export class CreateMovementDto {
     @IsOptional()
     @IsString()
     description?: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsInt({ each: true })
+    tagIds?: number[];
 }

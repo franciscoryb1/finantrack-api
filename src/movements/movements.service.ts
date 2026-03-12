@@ -32,7 +32,7 @@ export class MovementsService {
     }
 
     async createMovement(userId: number, dto: CreateMovementDto) {
-        const { accountId, categoryId, type, amountCents, occurredAt, description } = dto;
+        const { accountId, categoryId, type, amountCents, occurredAt, description, tagIds } = dto;
 
         await this.validateCategory(userId, categoryId);
 
@@ -58,6 +58,7 @@ export class MovementsService {
                     occurredAt: new Date(occurredAt),
                     description,
                     balanceSnapshotCents: newBalance,
+                    ...(tagIds?.length ? { tags: { connect: tagIds.map(id => ({ id })) } } : {}),
                 },
             });
 
@@ -148,6 +149,7 @@ export class MovementsService {
                     account: { select: { id: true, name: true, type: true } },
                     category: { select: { id: true, name: true, type: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
                     recurringPayment: { select: { id: true } },
+                    tags: { select: { id: true, name: true, color: true } },
                 },
             }),
             this.prisma.movement.count({ where }),
@@ -168,6 +170,7 @@ export class MovementsService {
             include: {
                 account: { select: { id: true, name: true, type: true } },
                 category: { select: { id: true, name: true, type: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
+                tags: { select: { id: true, name: true, color: true } },
             },
         });
 
@@ -286,6 +289,7 @@ export class MovementsService {
                     occurredAt: nextOccurredAt,
                     description: nextDescription,
                     balanceSnapshotCents: nextAccountBalance,
+                    ...(dto.tagIds !== undefined ? { tags: { set: dto.tagIds.map(id => ({ id })) } } : {}),
                 },
             });
 
