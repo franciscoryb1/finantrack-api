@@ -15,6 +15,7 @@ import { InstallmentsModule } from './credit-card-installments/credit-card-insta
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AccountTransfersModule } from './account-transfers/account-transfers.module';
 import { RecurringExpensesModule } from './recurring-expenses/recurring-expenses.module';
+import { TagsModule } from './tags/tags.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { RecurringExpensesModule } from './recurring-expenses/recurring-expenses
     DashboardModule,
     AccountTransfersModule,
     RecurringExpensesModule,
+    TagsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

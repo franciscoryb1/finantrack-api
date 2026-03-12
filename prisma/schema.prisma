@@ -60,6 +60,7 @@ model User {
   categories   Category[]
   movements    Movement[]
   recurringExpenses RecurringExpense[]
+  tags         Tag[]
 
   creditCards             CreditCard[]
   creditCardPurchases     CreditCardPurchase[]
@@ -141,6 +142,7 @@ model Movement {
   transferOut AccountTransfer? @relation("TransferFromMovement")
   transferIn  AccountTransfer? @relation("TransferToMovement")
   recurringPayment RecurringExpensePayment?
+  tags        Tag[]
 
   @@index([userId, occurredAt])
   @@index([userId, isDeleted])
@@ -355,6 +357,22 @@ model RecurringExpense {
 
   @@index([userId])
   @@index([categoryId])
+}
+
+model Tag {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String
+  color     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movements Movement[]
+
+  @@unique([name, userId])
+  @@index([userId])
 }
 
 model RecurringExpensePayment {
