@@ -64,7 +64,7 @@ export class CreditCardsService {
                     id: dto.bankAccountId,
                     userId,
                     isActive: true,
-                    type: AccountType.BANK,
+                    type: { in: [AccountType.BANK, AccountType.WALLET] },
                 },
             });
 
