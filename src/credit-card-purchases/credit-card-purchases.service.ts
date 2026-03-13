@@ -9,7 +9,7 @@ import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
 import { ReassignCardDto } from './dto/reassign-card.dto';
-import { CategoryType, CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
+import { CategoryType, CreditCardInstallmentStatus, CreditCardStatementStatus, MovementType } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 
 function toDateOnly(date: Date): Date {
@@ -91,6 +91,70 @@ export class CreditCardPurchasesService {
         return count > 0;
     }
 
+    /** Crea el movimiento INCOME de reintegro y lo vincula a la compra. */
+    private async createReimbursementMovement(
+        tx: Prisma.TransactionClient,
+        userId: number,
+        purchaseId: number,
+        amountCents: number,
+        accountId: number,
+        at: Date,
+        purchaseDescription: string | null,
+    ) {
+        const account = await tx.account.findFirst({
+            where: { id: accountId, userId, isActive: true },
+            select: { id: true, currentBalanceCents: true },
+        });
+        if (!account) throw new BadRequestException('Reimbursement account not found or inactive');
+
+        const newBalance = account.currentBalanceCents + amountCents;
+
+        const movement = await tx.movement.create({
+            data: {
+                userId,
+                accountId,
+                type: MovementType.INCOME,
+                amountCents,
+                occurredAt: at,
+                description: purchaseDescription ? `Reintegro - ${purchaseDescription}` : 'Reintegro',
+                balanceSnapshotCents: newBalance,
+            },
+        });
+
+        await tx.account.update({
+            where: { id: accountId },
+            data: { currentBalanceCents: newBalance },
+        });
+
+        await tx.creditCardPurchase.update({
+            where: { id: purchaseId },
+            data: { reimbursementMovementId: movement.id },
+        });
+
+        return movement;
+    }
+
+    /** Soft-delete del movimiento de reintegro y reversión del saldo. */
+    private async deleteReimbursementMovement(
+        tx: Prisma.TransactionClient,
+        movementId: number,
+    ) {
+        const movement = await tx.movement.findUnique({
+            where: { id: movementId },
+            select: { id: true, accountId: true, amountCents: true, isDeleted: true },
+        });
+        if (!movement || movement.isDeleted) return;
+
+        await tx.account.update({
+            where: { id: movement.accountId },
+            data: { currentBalanceCents: { decrement: movement.amountCents } },
+        });
+
+        await tx.movement.update({
+            where: { id: movementId },
+            data: { isDeleted: true },
+        });
+    }
 
     // ---------- core ----------
 
@@ -116,13 +180,17 @@ export class CreditCardPurchasesService {
             installmentsCount,
             occurredAt,
             description,
+            reimbursementAmountCents,
+            reimbursementAccountId,
+            reimbursementAt,
         } = dto;
 
-        // valido categoria y tarjeta
         await this.validateCategory(userId, categoryId);
         const creditCard = await this.validateCard(userId, creditCardId);
 
         const occurredDate = new Date(occurredAt);
+
+        const hasReimbursement = !!(reimbursementAmountCents && reimbursementAccountId);
 
         return this.prisma.$transaction(async (tx) => {
 
@@ -141,11 +209,7 @@ export class CreditCardPurchasesService {
                 throw new BadRequestException('Credit card limit exceeded');
             }
 
-
-            // Buscar el statement OPEN que contenga el timestamp exacto de la compra.
-            // Usamos el timestamp real (no date-only) para evitar problemas de zona horaria:
-            // los statements se guardan como medianoche local (ej: 03:00 UTC para UTC-3),
-            // y la compra puede ser posterior en el mismo día UTC.
+            // Buscar statement OPEN que cubra la fecha de la compra
             const openStatement = await tx.creditCardStatement.findFirst({
                 where: {
                     creditCardId,
@@ -161,7 +225,6 @@ export class CreditCardPurchasesService {
             if (openStatement) {
                 firstStatementSequence = openStatement.sequenceNumber;
             } else {
-                // no hay statement abierto que cubra esta fecha → empieza en el próximo
                 const lastStatement = await tx.creditCardStatement.findFirst({
                     where: { creditCardId },
                     orderBy: { sequenceNumber: 'desc' },
@@ -171,7 +234,6 @@ export class CreditCardPurchasesService {
                     ? lastStatement.sequenceNumber + 1
                     : 1;
             }
-
 
             // crear compra
             const purchase = await tx.creditCardPurchase.create({
@@ -184,10 +246,15 @@ export class CreditCardPurchasesService {
                     occurredAt: occurredDate,
                     description,
                     firstStatementSequence,
+                    ...(hasReimbursement && {
+                        reimbursementAmountCents,
+                        reimbursementAccountId,
+                        reimbursementAt: reimbursementAt ? new Date(reimbursementAt) : occurredDate,
+                    }),
                 },
             });
 
-            // generar cuotas (incluyendo compras en 1 solo pago)
+            // generar cuotas
             const baseAmount = Math.floor(totalAmountCents / installmentsCount);
             const remainder = totalAmountCents % installmentsCount;
 
@@ -211,6 +278,20 @@ export class CreditCardPurchasesService {
             await tx.creditCardInstallment.createMany({
                 data: installmentsData,
             });
+
+            // crear movimiento de reintegro si aplica
+            if (hasReimbursement) {
+                const reimbAt = reimbursementAt ? new Date(reimbursementAt) : occurredDate;
+                await this.createReimbursementMovement(
+                    tx,
+                    userId,
+                    purchase.id,
+                    reimbursementAmountCents!,
+                    reimbursementAccountId!,
+                    reimbAt,
+                    description ?? null,
+                );
+            }
 
             return purchase;
         });
@@ -297,7 +378,6 @@ export class CreditCardPurchasesService {
                         year < currentYear ||
                         (year === currentYear && month < currentMonth);
 
-                    // periodStartDate = closingDate del mes anterior si existe, sino día 1
                     const prevTotalMonths = year * 12 + (month - 1) - 1;
                     const prevYear = Math.floor(prevTotalMonths / 12);
                     const prevMonth = (prevTotalMonths % 12) + 1;
@@ -312,7 +392,7 @@ export class CreditCardPurchasesService {
                         ? new Date(prevStmt.closingDate)
                         : new Date(year, month - 1, 1);
 
-                    const closingDate = new Date(year, month, 0); // último día del mes
+                    const closingDate = new Date(year, month, 0);
                     const dueDate = new Date(closingDate);
                     dueDate.setDate(dueDate.getDate() + 5);
 
@@ -430,18 +510,31 @@ export class CreditCardPurchasesService {
             await this.validateCategory(userId, dto.categoryId);
         }
 
+        // Separar campos de reintegro del resto del DTO
+        const {
+            reimbursementAmountCents,
+            reimbursementAccountId,
+            reimbursementAt,
+            ...purchaseUpdateData
+        } = dto;
+
+        const isChangingReimbursement =
+            reimbursementAmountCents !== undefined ||
+            reimbursementAccountId !== undefined ||
+            reimbursementAt !== undefined;
+
         return this.prisma.$transaction(async (tx) => {
 
             const mustRegenerate =
-                dto.totalAmountCents !== undefined ||
-                dto.installmentsCount !== undefined ||
-                dto.occurredAt !== undefined;
+                purchaseUpdateData.totalAmountCents !== undefined ||
+                purchaseUpdateData.installmentsCount !== undefined ||
+                purchaseUpdateData.occurredAt !== undefined;
 
             const updated = await tx.creditCardPurchase.update({
                 where: { id: purchaseId },
                 data: {
-                    ...dto,
-                    ...(dto.occurredAt && { occurredAt: new Date(dto.occurredAt) }),
+                    ...purchaseUpdateData,
+                    ...(purchaseUpdateData.occurredAt && { occurredAt: new Date(purchaseUpdateData.occurredAt) }),
                 },
             });
 
@@ -453,7 +546,6 @@ export class CreditCardPurchasesService {
 
                 const occurredDate = updated.occurredAt;
 
-                // 🔹 recalcular firstStatementSequence (mismo criterio que create)
                 const openStatement = await tx.creditCardStatement.findFirst({
                     where: {
                         creditCardId: updated.creditCardId,
@@ -484,7 +576,6 @@ export class CreditCardPurchasesService {
                     data: { firstStatementSequence },
                 });
 
-                // 🔹 regenerar cuotas
                 const { totalAmountCents, installmentsCount } = updated;
 
                 if (installmentsCount > 1) {
@@ -511,6 +602,68 @@ export class CreditCardPurchasesService {
                     await tx.creditCardInstallment.createMany({
                         data: installmentsData,
                     });
+                }
+            }
+
+            // ── Manejar cambios en el reintegro ──
+            if (isChangingReimbursement) {
+                const clearing = reimbursementAmountCents === null;
+
+                if (clearing) {
+                    // Eliminar reintegro existente
+                    if (purchase.reimbursementMovementId) {
+                        await this.deleteReimbursementMovement(tx, purchase.reimbursementMovementId);
+                    }
+                    await tx.creditCardPurchase.update({
+                        where: { id: purchaseId },
+                        data: {
+                            reimbursementAmountCents: null,
+                            reimbursementAccountId: null,
+                            reimbursementAt: null,
+                            reimbursementMovementId: null,
+                        },
+                    });
+                } else {
+                    // Agregar o actualizar reintegro:
+                    // Eliminar el movimiento anterior si existe
+                    if (purchase.reimbursementMovementId) {
+                        await this.deleteReimbursementMovement(tx, purchase.reimbursementMovementId);
+                        await tx.creditCardPurchase.update({
+                            where: { id: purchaseId },
+                            data: { reimbursementMovementId: null },
+                        });
+                    }
+
+                    const newAmountCents = reimbursementAmountCents ?? purchase.reimbursementAmountCents;
+                    const newAccountId = reimbursementAccountId ?? purchase.reimbursementAccountId;
+                    const newAt = reimbursementAt
+                        ? new Date(reimbursementAt)
+                        : (purchase.reimbursementAt ?? updated.occurredAt);
+
+                    if (!newAmountCents || !newAccountId) {
+                        throw new BadRequestException(
+                            'Both reimbursementAmountCents and reimbursementAccountId are required',
+                        );
+                    }
+
+                    await tx.creditCardPurchase.update({
+                        where: { id: purchaseId },
+                        data: {
+                            reimbursementAmountCents: newAmountCents,
+                            reimbursementAccountId: newAccountId,
+                            reimbursementAt: newAt,
+                        },
+                    });
+
+                    await this.createReimbursementMovement(
+                        tx,
+                        userId,
+                        purchaseId,
+                        newAmountCents,
+                        newAccountId,
+                        newAt,
+                        updated.description,
+                    );
                 }
             }
 
@@ -627,13 +780,18 @@ export class CreditCardPurchasesService {
         }
 
         return this.prisma.$transaction(async (tx) => {
+            // Eliminar movimiento de reintegro si existe
+            if (purchase.reimbursementMovementId) {
+                await this.deleteReimbursementMovement(tx, purchase.reimbursementMovementId);
+            }
+
             await tx.creditCardInstallment.deleteMany({
                 where: { purchaseId },
             });
 
             return tx.creditCardPurchase.update({
                 where: { id: purchaseId },
-                data: { isDeleted: true },
+                data: { isDeleted: true, reimbursementMovementId: null },
             });
         });
     }

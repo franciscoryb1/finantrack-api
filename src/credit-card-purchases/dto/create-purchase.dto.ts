@@ -22,4 +22,18 @@ export class CreatePurchaseDto {
     @IsOptional()
     @IsString()
     description?: string;
+
+    // Reintegro promocional (opcional)
+    @IsOptional()
+    @IsInt()
+    @IsPositive()
+    reimbursementAmountCents?: number;
+
+    @IsOptional()
+    @IsInt()
+    reimbursementAccountId?: number;
+
+    @IsOptional()
+    @IsDateString()
+    reimbursementAt?: string;
 }

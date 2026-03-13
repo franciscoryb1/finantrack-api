@@ -22,4 +22,18 @@ export class UpdatePurchaseDto {
     @IsOptional()
     @IsString()
     description?: string | null;
+
+    // Reintegro promocional (opcional, null para eliminar)
+    @IsOptional()
+    @IsInt()
+    @IsPositive()
+    reimbursementAmountCents?: number | null;
+
+    @IsOptional()
+    @IsInt()
+    reimbursementAccountId?: number | null;
+
+    @IsOptional()
+    @IsDateString()
+    reimbursementAt?: string | null;
 }
