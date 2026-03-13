@@ -84,10 +84,11 @@ model Account {
   user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   movements            Movement[]
 
-  creditCardsAsBank    CreditCard[] @relation("AccountAsBankForCards")
-  creditCardPayments   CreditCardPayment[]
-  transfersFrom        AccountTransfer[] @relation("TransferFromAccount")
-  transfersTo          AccountTransfer[] @relation("TransferToAccount")
+  creditCardsAsBank      CreditCard[] @relation("AccountAsBankForCards")
+  creditCardPayments     CreditCardPayment[]
+  transfersFrom          AccountTransfer[] @relation("TransferFromAccount")
+  transfersTo            AccountTransfer[] @relation("TransferToAccount")
+  purchaseReimbursements CreditCardPurchase[] @relation("PurchaseReimbursementAccount")
 
   @@index([userId])
 }
@@ -138,11 +139,12 @@ model Movement {
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   account     Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
   category    Category?    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  creditCardPayment CreditCardPayment?
-  transferOut AccountTransfer? @relation("TransferFromMovement")
-  transferIn  AccountTransfer? @relation("TransferToMovement")
-  recurringPayment RecurringExpensePayment?
-  tags        Tag[]
+  creditCardPayment  CreditCardPayment?
+  transferOut        AccountTransfer? @relation("TransferFromMovement")
+  transferIn         AccountTransfer? @relation("TransferToMovement")
+  recurringPayment   RecurringExpensePayment?
+  reimbursedPurchase CreditCardPurchase? @relation("PurchaseReimbursementMovement")
+  tags               Tag[]
 
   @@index([userId, occurredAt])
   @@index([userId, isDeleted])
@@ -215,6 +217,12 @@ model CreditCardPurchase {
   occurredAt         DateTime
   description        String?
 
+  // Reintegro promocional (opcional)
+  reimbursementAmountCents Int?
+  reimbursementAccountId   Int?
+  reimbursementAt          DateTime?
+  reimbursementMovementId  Int?      @unique
+
   isDeleted          Boolean   @default(false)
 
   createdAt          DateTime  @default(now())
@@ -223,6 +231,8 @@ model CreditCardPurchase {
   user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   creditCard         CreditCard @relation(fields: [creditCardId], references: [id], onDelete: Restrict)
   category           Category?  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  reimbursementAccount  Account?  @relation("PurchaseReimbursementAccount", fields: [reimbursementAccountId], references: [id], onDelete: Restrict)
+  reimbursementMovement Movement? @relation("PurchaseReimbursementMovement", fields: [reimbursementMovementId], references: [id], onDelete: SetNull)
 
   installments       CreditCardInstallment[]
 
