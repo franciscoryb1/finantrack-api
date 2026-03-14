@@ -202,6 +202,11 @@ export class MovementsService {
 
             this.ensureNonNegative(revertedBalance);
 
+            // Si el movimiento pagó un gasto recurrente, eliminar ese pago
+            await tx.recurringExpensePayment.deleteMany({
+                where: { movementId: movement.id },
+            });
+
             await tx.movement.update({
                 where: { id: movement.id },
                 data: { isDeleted: true },
