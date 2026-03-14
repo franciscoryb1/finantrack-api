@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AccountTransfersService } from './account-transfers.service';
 import { CreateTransferDto } from './dto/create-transfer.dto';
@@ -17,6 +17,12 @@ export class AccountTransfersController {
     @Patch(':id')
     update(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTransferDto) {
         return this.service.update(req.user.userId, id, dto);
+    }
+
+    @Delete(':id')
+    @HttpCode(204)
+    delete(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+        return this.service.delete(req.user.userId, id);
     }
 
     @Get()

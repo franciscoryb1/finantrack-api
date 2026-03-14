@@ -137,6 +137,36 @@ export class AccountTransfersService {
         });
     }
 
+    async delete(userId: number, id: number) {
+        return this.prisma.$transaction(async (tx) => {
+            const transfer = await tx.accountTransfer.findFirst({
+                where: { id, userId },
+                include: {
+                    fromAccount: { select: { id: true, currentBalanceCents: true } },
+                    toAccount: { select: { id: true, currentBalanceCents: true } },
+                },
+            });
+
+            if (!transfer) throw new NotFoundException('Transfer not found');
+
+            // Revert balances
+            const revertedFromBalance = transfer.fromAccount.currentBalanceCents + transfer.amountCents;
+            const revertedToBalance = transfer.toAccount.currentBalanceCents - transfer.amountCents;
+
+            await Promise.all([
+                tx.account.update({ where: { id: transfer.fromAccountId }, data: { currentBalanceCents: revertedFromBalance } }),
+                tx.account.update({ where: { id: transfer.toAccountId }, data: { currentBalanceCents: revertedToBalance } }),
+            ]);
+
+            // Delete AccountTransfer first (it holds FKs to movements), then the movements
+            await tx.accountTransfer.delete({ where: { id } });
+            await Promise.all([
+                tx.movement.delete({ where: { id: transfer.fromMovementId } }),
+                tx.movement.delete({ where: { id: transfer.toMovementId } }),
+            ]);
+        });
+    }
+
     async listByUser(userId: number) {
         return this.prisma.accountTransfer.findMany({
             where: { userId },
