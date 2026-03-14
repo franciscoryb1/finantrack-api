@@ -12,7 +12,8 @@
       "Bash(npx shadcn@latest:*)",
       "Bash(npx tsc:*)",
       "Bash(xargs cat:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(git add:*)"
     ]
   }
 }
