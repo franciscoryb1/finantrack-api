@@ -1,7 +1,9 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
+    HttpCode,
     Patch,
     Post,
     Param,
@@ -46,6 +48,17 @@ export class CreditCardsController {
     @Patch(':id/activate')
     activate(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
         return this.service.setActive(req.user.userId, id, true);
+    }
+
+    @Get(':id/delete-preview')
+    getDeletePreview(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+        return this.service.getDeletePreview(req.user.userId, id);
+    }
+
+    @Delete(':id')
+    @HttpCode(204)
+    delete(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+        return this.service.delete(req.user.userId, id);
     }
 
     @Get(':id/summary')

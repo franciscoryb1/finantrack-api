@@ -20,4 +20,8 @@ export class CreateCreditCardDto {
 
     @IsInt()
     bankAccountId: number;
+
+    @IsOptional()
+    @IsString()
+    backgroundColor?: string;
 }

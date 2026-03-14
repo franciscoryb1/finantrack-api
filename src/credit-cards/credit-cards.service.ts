@@ -46,6 +46,7 @@ export class CreditCardsService {
                 cardLast4: dto.cardLast4,
                 cardExpiresAt: new Date(dto.cardExpiresAt),
                 bankAccountId: dto.bankAccountId,
+                ...(dto.backgroundColor && { backgroundColor: dto.backgroundColor }),
             },
         });
     }
@@ -93,6 +94,42 @@ export class CreditCardsService {
         return this.prisma.creditCard.update({
             where: { id: cardId },
             data: { isActive },
+        });
+    }
+
+    async getDeletePreview(userId: number, cardId: number) {
+        const card = await this.prisma.creditCard.findFirst({ where: { id: cardId, userId } });
+        if (!card) throw new NotFoundException('Card not found');
+
+        const [purchasesCount, statementsCount, paymentsCount, installmentsCount] = await Promise.all([
+            this.prisma.creditCardPurchase.count({ where: { creditCardId: cardId } }),
+            this.prisma.creditCardStatement.count({ where: { creditCardId: cardId } }),
+            this.prisma.creditCardPayment.count({ where: { statement: { creditCardId: cardId } } }),
+            this.prisma.creditCardInstallment.count({ where: { purchase: { creditCardId: cardId } } }),
+        ]);
+
+        return { purchasesCount, statementsCount, paymentsCount, installmentsCount };
+    }
+
+    async delete(userId: number, cardId: number) {
+        const card = await this.prisma.creditCard.findFirst({ where: { id: cardId, userId } });
+        if (!card) throw new NotFoundException('Card not found');
+
+        await this.prisma.$transaction(async (tx) => {
+            // 1. Payments reference statements (Restrict) — must go first
+            await tx.creditCardPayment.deleteMany({
+                where: { statement: { creditCardId: cardId } },
+            });
+            // 2. Installments reference purchases and statements
+            await tx.creditCardInstallment.deleteMany({
+                where: { purchase: { creditCardId: cardId } },
+            });
+            // 3. Purchases reference card (Restrict)
+            await tx.creditCardPurchase.deleteMany({ where: { creditCardId: cardId } });
+            // 4. Statements reference card (Restrict)
+            await tx.creditCardStatement.deleteMany({ where: { creditCardId: cardId } });
+            // 5. Finally the card itself
+            await tx.creditCard.delete({ where: { id: cardId } });
         });
     }
 

@@ -25,4 +25,8 @@ export class UpdateCreditCardDto {
     @IsOptional()
     @IsInt()
     bankAccountId?: number;
+
+    @IsOptional()
+    @IsString()
+    backgroundColor?: string;
 }
