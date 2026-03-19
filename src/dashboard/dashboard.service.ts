@@ -12,7 +12,7 @@ export type DashboardActivityItem = {
     purchaseDate: string | null; // Solo para cuotas: fecha original de la compra.
     registeredAt: string;        // Fecha de creación del registro (movement.createdAt o purchase.createdAt).
     amountCents: number;
-    type: 'INCOME' | 'EXPENSE' | 'STATEMENT_PAYMENT' | 'TRANSFER_OUT' | 'TRANSFER_IN';
+    type: 'INCOME' | 'EXPENSE' | 'STATEMENT_PAYMENT' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'BALANCE_ADJUSTMENT';
     isRecurring: boolean;
     tags: { id: number; name: string; color: string | null }[];
     category: { id: number; name: string; color: string | null; parent: { id: number; name: string; color: string | null } | null } | null;
@@ -20,6 +20,9 @@ export type DashboardActivityItem = {
     creditCard: { id: number; name: string; brand: string | null; cardLast4: string } | null;
     installmentInfo: { installmentNumber: number; installmentsCount: number; purchaseId: number; reimbursementAmountCents: number | null; reimbursementAccountId: number | null; reimbursementAt: string | null } | null;
     transferData: { id: number; fromAccountId: number; toAccountId: number; amountCents: number; description: string | null; transferredAt: string; fromAccount: { id: number; name: string }; toAccount: { id: number; name: string } } | null;
+    sharedExpense: { sharedAmountCents: number; receivedAmountCents: number; pendingAmountCents: number } | null;
+    incomeSource: 'PURCHASE_REIMBURSEMENT' | 'SHARED_REIMBURSEMENT' | null;
+    balanceAdjustmentIncreased: boolean | null;
 };
 
 @Injectable()
@@ -44,6 +47,11 @@ export class DashboardService {
                 tags: { select: { id: true, name: true, color: true } },
                 transferOut: { select: { id: true, fromAccountId: true, toAccountId: true, amountCents: true, description: true, transferredAt: true, fromAccount: { select: { id: true, name: true } }, toAccount: { select: { id: true, name: true } } } },
                 transferIn: { select: { id: true, fromAccountId: true, toAccountId: true, amountCents: true, description: true, transferredAt: true, fromAccount: { select: { id: true, name: true } }, toAccount: { select: { id: true, name: true } } } },
+                sharedReimbursements: {
+                    where: { isDeleted: false },
+                    select: { amountCents: true },
+                },
+                reimbursedPurchase: { select: { id: true } },
             },
             orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         });
@@ -91,6 +99,10 @@ export class DashboardService {
                                 select: { id: true, name: true, brand: true, cardLast4: true },
                             },
                             category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
+                            sharedReimbursements: {
+                                where: { isDeleted: false },
+                                select: { amountCents: true },
+                            },
                         },
                     },
                 },
@@ -105,6 +117,10 @@ export class DashboardService {
                     inst.purchase.firstStatementSequence + inst.billingCycleOffset === stmtSequence;
 
                 if (!belongsToPeriod) continue;
+
+                const purchaseReceivedCents = inst.purchase.sharedAmountCents
+                    ? inst.purchase.sharedReimbursements.reduce((s: number, r: { amountCents: number }) => s + r.amountCents, 0)
+                    : 0;
 
                 installmentItems.push({
                     kind: 'CREDIT_CARD_INSTALLMENT',
@@ -130,36 +146,58 @@ export class DashboardService {
                         reimbursementAccountId: inst.purchase.reimbursementAccountId ?? null,
                         reimbursementAt: inst.purchase.reimbursementAt?.toISOString() ?? null,
                     },
+                    sharedExpense: inst.purchase.sharedAmountCents ? {
+                        sharedAmountCents: inst.purchase.sharedAmountCents,
+                        receivedAmountCents: purchaseReceivedCents,
+                        pendingAmountCents: inst.purchase.sharedAmountCents - purchaseReceivedCents,
+                    } : null,
+                    incomeSource: null,
+                    balanceAdjustmentIncreased: null,
                 });
             }
         }
 
         // ── 3. Normalizar movements y combinar ────────────────────────────────
-        const movementItems: DashboardActivityItem[] = movements.map(m => ({
-            kind: 'MOVEMENT',
-            id: m.id,
-            description: m.description,
-            occurredAt: m.occurredAt.toISOString(),
-            purchaseDate: null,
-            registeredAt: m.createdAt.toISOString(),
-            amountCents: m.amountCents,
-            type: m.type === MovementType.INCOME ? 'INCOME'
-                : m.type === MovementType.STATEMENT_PAYMENT ? 'STATEMENT_PAYMENT'
-                : m.type === MovementType.TRANSFER_OUT ? 'TRANSFER_OUT'
-                : m.type === MovementType.TRANSFER_IN ? 'TRANSFER_IN'
-                : 'EXPENSE',
-            isRecurring: !!m.recurringPayment,
-            tags: m.tags,
-            category: m.category ?? null,
-            account: m.account,
-            creditCard: null,
-            installmentInfo: null,
-            transferData: m.transferOut
-                ? { ...m.transferOut, transferredAt: m.transferOut.transferredAt.toISOString() }
-                : m.transferIn
-                ? { ...m.transferIn, transferredAt: m.transferIn.transferredAt.toISOString() }
-                : null,
-        }));
+        const movementItems: DashboardActivityItem[] = movements.map(m => {
+            const receivedAmountCents = m.sharedAmountCents
+                ? m.sharedReimbursements.reduce((s: number, r: { amountCents: number }) => s + r.amountCents, 0)
+                : 0;
+            return {
+                kind: 'MOVEMENT',
+                id: m.id,
+                description: m.description,
+                occurredAt: m.occurredAt.toISOString(),
+                purchaseDate: null,
+                registeredAt: m.createdAt.toISOString(),
+                amountCents: Math.abs(m.amountCents),
+                type: m.type === MovementType.INCOME ? 'INCOME'
+                    : m.type === MovementType.STATEMENT_PAYMENT ? 'STATEMENT_PAYMENT'
+                    : m.type === MovementType.TRANSFER_OUT ? 'TRANSFER_OUT'
+                    : m.type === MovementType.TRANSFER_IN ? 'TRANSFER_IN'
+                    : m.type === MovementType.BALANCE_ADJUSTMENT ? 'BALANCE_ADJUSTMENT'
+                    : 'EXPENSE',
+                isRecurring: !!m.recurringPayment,
+                tags: m.tags,
+                category: m.category ?? null,
+                account: m.account,
+                creditCard: null,
+                installmentInfo: null,
+                transferData: m.transferOut
+                    ? { ...m.transferOut, transferredAt: m.transferOut.transferredAt.toISOString() }
+                    : m.transferIn
+                    ? { ...m.transferIn, transferredAt: m.transferIn.transferredAt.toISOString() }
+                    : null,
+                sharedExpense: m.sharedAmountCents ? {
+                    sharedAmountCents: m.sharedAmountCents,
+                    receivedAmountCents,
+                    pendingAmountCents: m.sharedAmountCents - receivedAmountCents,
+                } : null,
+                incomeSource: m.reimbursedPurchase ? 'PURCHASE_REIMBURSEMENT'
+                    : (m.sharedFromMovementId || m.sharedFromCreditCardPurchaseId) ? 'SHARED_REIMBURSEMENT'
+                    : null,
+                balanceAdjustmentIncreased: m.type === MovementType.BALANCE_ADJUSTMENT ? m.amountCents > 0 : null,
+            };
+        });
 
         const allItems = [...movementItems, ...installmentItems].sort(
             (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
