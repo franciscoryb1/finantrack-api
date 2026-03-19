@@ -4,6 +4,7 @@ import { CreateMovementDto } from './dto/create-movement.dto';
 import { GetMovementsSummaryDto } from './dto/get-movements-summary.dto';
 import { ListMovementsDto } from './dto/list-movements.dto';
 import { UpdateMovementDto } from './dto/update-movement.dto';
+import { RegisterReimbursementDto } from './dto/register-reimbursement.dto';
 import { MovementType } from '@prisma/client';
 
 @Injectable()
@@ -32,9 +33,13 @@ export class MovementsService {
     }
 
     async createMovement(userId: number, dto: CreateMovementDto) {
-        const { accountId, categoryId, type, amountCents, occurredAt, description, tagIds } = dto;
+        const { accountId, categoryId, type, amountCents, occurredAt, description, tagIds, sharedAmountCents } = dto;
 
         await this.validateCategory(userId, categoryId);
+
+        if (sharedAmountCents !== undefined && sharedAmountCents > amountCents) {
+            throw new BadRequestException('sharedAmountCents cannot exceed amountCents');
+        }
 
         // Transacción: leer cuenta activa del user + crear movimiento + update saldo
         return this.prisma.$transaction(async (tx) => {
@@ -58,6 +63,7 @@ export class MovementsService {
                     occurredAt: new Date(occurredAt),
                     description,
                     balanceSnapshotCents: newBalance,
+                    sharedAmountCents,
                     ...(tagIds?.length ? { tags: { connect: tagIds.map(id => ({ id })) } } : {}),
                 },
             });
@@ -150,6 +156,11 @@ export class MovementsService {
                     category: { select: { id: true, name: true, type: true, color: true, parent: { select: { id: true, name: true, color: true } } } },
                     recurringPayment: { select: { id: true } },
                     tags: { select: { id: true, name: true, color: true } },
+                    sharedReimbursements: {
+                        where: { isDeleted: false },
+                        select: { amountCents: true },
+                    },
+                    reimbursedPurchase: { select: { id: true } },
                 },
             }),
             this.prisma.movement.count({ where }),
@@ -187,6 +198,15 @@ export class MovementsService {
 
             if (!movement) throw new NotFoundException('Movement not found');
 
+            if (movement.type === MovementType.BALANCE_ADJUSTMENT) {
+                // Solo eliminar el registro; el saldo ya fue aplicado y no se revierte
+                await tx.movement.update({
+                    where: { id: movement.id },
+                    data: { isDeleted: true },
+                });
+                return { success: true };
+            }
+
             const account = await tx.account.findFirst({
                 where: { id: movement.accountId, userId },
                 select: { id: true, currentBalanceCents: true },
@@ -205,6 +225,12 @@ export class MovementsService {
             // Si el movimiento pagó un gasto recurrente, eliminar ese pago
             await tx.recurringExpensePayment.deleteMany({
                 where: { movementId: movement.id },
+            });
+
+            // Desreferenciar reintegros compartidos que apuntan a este movimiento
+            await tx.movement.updateMany({
+                where: { sharedFromMovementId: movement.id },
+                data: { sharedFromMovementId: null },
             });
 
             await tx.movement.update({
@@ -234,10 +260,29 @@ export class MovementsService {
                     amountCents: true,
                     occurredAt: true,
                     description: true,
+                    sharedAmountCents: true,
+                    sharedReimbursements: {
+                        where: { isDeleted: false },
+                        select: { amountCents: true },
+                    },
                 },
             });
 
             if (!original) throw new NotFoundException('Movement not found');
+
+            if (original.type === MovementType.BALANCE_ADJUSTMENT) {
+                // Solo permite actualizar categoría y descripción
+                if (dto.categoryId !== undefined) {
+                    await this.validateCategory(userId, dto.categoryId);
+                }
+                return tx.movement.update({
+                    where: { id },
+                    data: {
+                        ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
+                        ...(dto.description !== undefined && { description: dto.description }),
+                    },
+                });
+            }
 
             const nextAccountId = dto.accountId ?? original.accountId;
             const nextType = dto.type ?? original.type;
@@ -246,6 +291,20 @@ export class MovementsService {
             const nextDescription = dto.description === undefined ? original.description : dto.description;
             const nextCategoryId =
                 dto.categoryId === undefined ? original.categoryId : dto.categoryId;
+
+            // Validate sharedAmountCents if being changed
+            if (dto.sharedAmountCents !== undefined) {
+                if (dto.sharedAmountCents !== null) {
+                    const effectiveAmount = dto.amountCents ?? original.amountCents;
+                    if (dto.sharedAmountCents > effectiveAmount) {
+                        throw new BadRequestException('sharedAmountCents cannot exceed amountCents');
+                    }
+                    const alreadyReceived = original.sharedReimbursements.reduce((s, r) => s + r.amountCents, 0);
+                    if (dto.sharedAmountCents < alreadyReceived) {
+                        throw new BadRequestException(`sharedAmountCents cannot be less than already received reimbursements (${alreadyReceived} cents)`);
+                    }
+                }
+            }
 
             await this.validateCategory(userId, nextCategoryId ?? undefined);
 
@@ -294,6 +353,7 @@ export class MovementsService {
                     occurredAt: nextOccurredAt,
                     description: nextDescription,
                     balanceSnapshotCents: nextAccountBalance,
+                    ...(dto.sharedAmountCents !== undefined ? { sharedAmountCents: dto.sharedAmountCents } : {}),
                     ...(dto.tagIds !== undefined ? { tags: { set: dto.tagIds.map(id => ({ id })) } } : {}),
                 },
             });
@@ -317,6 +377,71 @@ export class MovementsService {
             }
 
             return { success: true };
+        });
+    }
+
+    async registerSharedReimbursement(userId: number, movementId: number, dto: RegisterReimbursementDto) {
+        return this.prisma.$transaction(async (tx) => {
+            // 1. Find the original movement
+            const original = await tx.movement.findFirst({
+                where: { id: movementId, userId, isDeleted: false },
+                select: {
+                    id: true, type: true, amountCents: true, sharedAmountCents: true, description: true,
+                    sharedReimbursements: {
+                        where: { isDeleted: false },
+                        select: { amountCents: true },
+                    },
+                },
+            });
+
+            if (!original) throw new NotFoundException('Movement not found');
+            if (!original.sharedAmountCents) throw new BadRequestException('Movement is not a shared expense');
+            if (original.type !== MovementType.EXPENSE) throw new BadRequestException('Only EXPENSE movements can have reimbursements');
+
+            const alreadyReceived = original.sharedReimbursements.reduce((s, r) => s + r.amountCents, 0);
+            const pending = original.sharedAmountCents - alreadyReceived;
+
+            if (dto.amountCents > pending) {
+                throw new BadRequestException(`Amount exceeds pending reimbursement (${pending} cents)`);
+            }
+
+            // 2. Find the destination account
+            const account = await tx.account.findFirst({
+                where: { id: dto.accountId, userId, isActive: true },
+                select: { id: true, currentBalanceCents: true },
+            });
+            if (!account) throw new BadRequestException('Account not found or inactive');
+
+            const newBalance = account.currentBalanceCents + dto.amountCents;
+
+            // 3. Create the INCOME movement
+            const movement = await tx.movement.create({
+                data: {
+                    userId,
+                    accountId: dto.accountId,
+                    type: MovementType.INCOME,
+                    amountCents: dto.amountCents,
+                    occurredAt: new Date(dto.occurredAt),
+                    description: dto.description ?? (original.description ? `Reintegro - ${original.description}` : 'Reintegro'),
+                    balanceSnapshotCents: newBalance,
+                    sharedFromMovementId: movementId,
+                },
+            });
+
+            await tx.account.update({
+                where: { id: dto.accountId },
+                data: { currentBalanceCents: newBalance },
+            });
+
+            const newReceived = alreadyReceived + dto.amountCents;
+            return {
+                movement,
+                sharedExpense: {
+                    sharedAmountCents: original.sharedAmountCents,
+                    receivedAmountCents: newReceived,
+                    pendingAmountCents: original.sharedAmountCents - newReceived,
+                },
+            };
         });
     }
 }

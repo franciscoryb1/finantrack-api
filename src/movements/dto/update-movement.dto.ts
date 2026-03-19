@@ -31,4 +31,9 @@ export class UpdateMovementDto {
     @IsArray()
     @IsInt({ each: true })
     tagIds?: number[];
+
+    @IsOptional()
+    @IsInt()
+    @IsPositive()
+    sharedAmountCents?: number | null;
 }

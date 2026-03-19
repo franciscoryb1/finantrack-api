@@ -27,4 +27,9 @@ export class CreateMovementDto {
     @IsArray()
     @IsInt({ each: true })
     tagIds?: number[];
+
+    @IsOptional()
+    @IsInt()
+    @IsPositive()
+    sharedAmountCents?: number;
 }

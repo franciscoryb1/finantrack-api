@@ -5,6 +5,7 @@ import { CreateMovementDto } from './dto/create-movement.dto';
 import { GetMovementsSummaryDto } from './dto/get-movements-summary.dto';
 import { ListMovementsDto } from './dto/list-movements.dto';
 import { UpdateMovementDto } from './dto/update-movement.dto';
+import { RegisterReimbursementDto } from './dto/register-reimbursement.dto';
 
 @Controller('movements')
 @UseGuards(JwtAuthGuard)
@@ -43,5 +44,14 @@ export class MovementsController {
     @Delete(':id')
     softDelete(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
         return this.service.softDeleteMovement(req.user.userId, id);
+    }
+
+    @Post(':id/reimburse')
+    reimburse(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: RegisterReimbursementDto,
+    ) {
+        return this.service.registerSharedReimbursement(req.user.userId, id, dto);
     }
 }
