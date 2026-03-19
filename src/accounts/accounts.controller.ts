@@ -16,6 +16,7 @@ import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { ListAccountsDto } from './dto/list-accounts.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
+import { AdjustBalanceDto } from './dto/adjust-balance.dto';
 
 @Controller('accounts')
 @UseGuards(JwtAuthGuard)
@@ -50,6 +51,12 @@ export class AccountsController {
     activateAccount(@Req() req: any, @Param('id') id: string) {
         const userId = req.user.userId;
         return this.accountsService.activateAccount(userId, Number(id));
+    }
+
+    @Post(':id/adjust')
+    adjustBalance(@Req() req: any, @Param('id') id: string, @Body() dto: AdjustBalanceDto) {
+        const userId = req.user.userId;
+        return this.accountsService.adjustBalance(userId, Number(id), dto);
     }
 
     @Delete(':id')

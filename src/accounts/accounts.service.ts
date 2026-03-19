@@ -5,9 +5,11 @@ import {
     ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MovementType } from '@prisma/client';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { ListAccountsDto } from './dto/list-accounts.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
+import { AdjustBalanceDto } from './dto/adjust-balance.dto';
 
 @Injectable()
 export class AccountsService {
@@ -75,6 +77,41 @@ export class AccountsService {
         return this.prisma.account.update({
             where: { id: accountId },
             data: { name: dto.name },
+        });
+    }
+
+    // ADJUST BALANCE
+    async adjustBalance(userId: number, accountId: number, dto: AdjustBalanceDto) {
+        const { newBalanceCents, note, categoryId } = dto;
+
+        return this.prisma.$transaction(async (tx) => {
+            const account = await tx.account.findFirst({
+                where: { id: accountId, userId, isActive: true },
+                select: { id: true, currentBalanceCents: true },
+            });
+
+            if (!account) throw new ForbiddenException('Account not found or inactive');
+
+            const diff = newBalanceCents - account.currentBalanceCents;
+            if (diff === 0) return account;
+
+            await tx.movement.create({
+                data: {
+                    userId,
+                    accountId,
+                    type: MovementType.BALANCE_ADJUSTMENT,
+                    amountCents: diff, // positivo = sumó al saldo, negativo = restó
+                    occurredAt: new Date(),
+                    description: note ?? 'Ajuste de saldo',
+                    balanceSnapshotCents: newBalanceCents,
+                    ...(categoryId ? { categoryId } : {}),
+                },
+            });
+
+            return tx.account.update({
+                where: { id: accountId },
+                data: { currentBalanceCents: newBalanceCents },
+            });
         });
     }
 
