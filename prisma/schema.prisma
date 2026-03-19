@@ -24,6 +24,7 @@ enum MovementType {
   STATEMENT_PAYMENT
   TRANSFER_OUT
   TRANSFER_IN
+  BALANCE_ADJUSTMENT
 }
 
 enum AccountType {
@@ -48,7 +49,7 @@ model User {
   passwordHash String
   firstName    String?
   lastName     String?
-  phoneNumber  String @unique @db.VarChar(20)
+  phoneNumber  String? @unique @db.VarChar(30)
   isActive     Boolean  @default(true)
 
   createdAt    DateTime @default(now())
@@ -130,6 +131,9 @@ model Movement {
   balanceSnapshotCents Int
   occurredAt  DateTime
   description String?
+  sharedAmountCents              Int?
+  sharedFromMovementId           Int?
+  sharedFromCreditCardPurchaseId Int?
 
   isDeleted   Boolean      @default(false)
 
@@ -145,11 +149,16 @@ model Movement {
   recurringPayment   RecurringExpensePayment?
   reimbursedPurchase CreditCardPurchase? @relation("PurchaseReimbursementMovement")
   tags               Tag[]
+  sharedReimbursements         Movement[]          @relation("MovementSharedReimbursements")
+  sharedFromMovement           Movement?           @relation("MovementSharedReimbursements", fields: [sharedFromMovementId], references: [id], onDelete: SetNull)
+  sharedFromPurchase           CreditCardPurchase? @relation("PurchaseSharedReimbursements", fields: [sharedFromCreditCardPurchaseId], references: [id], onDelete: SetNull)
 
   @@index([userId, occurredAt])
   @@index([userId, isDeleted])
   @@index([accountId])
   @@index([categoryId])
+  @@index([sharedFromMovementId])
+  @@index([sharedFromCreditCardPurchaseId])
 }
 
 
@@ -216,6 +225,7 @@ model CreditCardPurchase {
   installmentsCount  Int       // >= 1
   occurredAt         DateTime
   description        String?
+  sharedAmountCents Int?
 
   // Reintegro promocional (opcional)
   reimbursementAmountCents Int?
@@ -233,6 +243,7 @@ model CreditCardPurchase {
   category           Category?  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   reimbursementAccount  Account?  @relation("PurchaseReimbursementAccount", fields: [reimbursementAccountId], references: [id], onDelete: Restrict)
   reimbursementMovement Movement? @relation("PurchaseReimbursementMovement", fields: [reimbursementMovementId], references: [id], onDelete: SetNull)
+  sharedReimbursements Movement[] @relation("PurchaseSharedReimbursements")
 
   installments       CreditCardInstallment[]
 
