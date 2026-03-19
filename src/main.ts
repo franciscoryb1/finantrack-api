@@ -23,11 +23,19 @@ async function bootstrap() {
 
   // CORS
   app.enableCors({
-    origin: [
-      'http://localhost:3001', // frontend local
-      // agregar aquí tu frontend en producción cuando lo tengas
-      // 'https://finantrack-frontend.onrender.com'
-    ],
+    origin: (origin, callback) => {
+      // Permitir: sin origin (curl, Postman), localhost, e IPs de red local
+      if (
+        !origin ||
+        origin === 'http://localhost:3001' ||
+        /^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin) ||
+        /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin)
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin not allowed — ${origin}`));
+      }
+    },
     credentials: true,
   });
 
