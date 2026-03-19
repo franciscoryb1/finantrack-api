@@ -26,15 +26,14 @@ export class UsersService {
     });
   }
 
-  async create(email: string,
-    passwordHash: string,
-    phoneNumber?: string) {
-
+  async create(email: string, passwordHash: string, firstName: string, lastName: string, phoneNumber?: string) {
     const userCreated = await this.prisma.user.create({
       data: {
         email,
         passwordHash,
-        phoneNumber: phoneNumber || '',
+        firstName,
+        lastName,
+        phoneNumber: phoneNumber || null,
       },
     });
 
@@ -45,11 +44,14 @@ export class UsersService {
     return {
       id: userCreated.id,
       email: userCreated.email,
+      firstName: userCreated.firstName,
+      lastName: userCreated.lastName,
       phoneNumber: userCreated.phoneNumber,
     }
   }
 
   async findByPhone(phoneNumber: string) {
+    if (!phoneNumber) return null;
     return this.prisma.user.findUnique({
       where: { phoneNumber },
     });
