@@ -36,4 +36,10 @@ export class CreatePurchaseDto {
     @IsOptional()
     @IsDateString()
     reimbursementAt?: string;
+
+    // Gasto compartido (opcional)
+    @IsOptional()
+    @IsInt()
+    @IsPositive()
+    sharedAmountCents?: number;
 }

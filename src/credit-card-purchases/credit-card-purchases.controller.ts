@@ -16,6 +16,7 @@ import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
 import { ReassignCardDto } from './dto/reassign-card.dto';
+import { RegisterReimbursementDto } from './dto/register-reimbursement.dto';
 
 @Controller('credit-card-purchases')
 @UseGuards(JwtAuthGuard)
@@ -61,5 +62,14 @@ export class CreditCardPurchasesController {
     @Delete(':id')
     remove(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
         return this.service.softDelete(req.user.userId, id);
+    }
+
+    @Post(':id/reimburse')
+    reimburse(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: RegisterReimbursementDto,
+    ) {
+        return this.service.registerSharedReimbursement(req.user.userId, id, dto);
     }
 }

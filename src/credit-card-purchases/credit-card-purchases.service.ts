@@ -9,6 +9,7 @@ import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
 import { ReassignCardDto } from './dto/reassign-card.dto';
+import { RegisterReimbursementDto } from './dto/register-reimbursement.dto';
 import { CategoryType, CreditCardInstallmentStatus, CreditCardStatementStatus, MovementType } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 
@@ -183,10 +184,15 @@ export class CreditCardPurchasesService {
             reimbursementAmountCents,
             reimbursementAccountId,
             reimbursementAt,
+            sharedAmountCents,
         } = dto;
 
         await this.validateCategory(userId, categoryId);
         const creditCard = await this.validateCard(userId, creditCardId);
+
+        if (sharedAmountCents !== undefined && sharedAmountCents > totalAmountCents) {
+            throw new BadRequestException('sharedAmountCents cannot exceed totalAmountCents');
+        }
 
         const occurredDate = new Date(occurredAt);
 
@@ -246,6 +252,7 @@ export class CreditCardPurchasesService {
                     occurredAt: occurredDate,
                     description,
                     firstStatementSequence,
+                    sharedAmountCents,
                     ...(hasReimbursement && {
                         reimbursementAmountCents,
                         reimbursementAccountId,
@@ -510,11 +517,12 @@ export class CreditCardPurchasesService {
             await this.validateCategory(userId, dto.categoryId);
         }
 
-        // Separar campos de reintegro del resto del DTO
+        // Separar campos de reintegro y compartido del resto del DTO
         const {
             reimbursementAmountCents,
             reimbursementAccountId,
             reimbursementAt,
+            sharedAmountCents,
             ...purchaseUpdateData
         } = dto;
 
@@ -522,6 +530,13 @@ export class CreditCardPurchasesService {
             reimbursementAmountCents !== undefined ||
             reimbursementAccountId !== undefined ||
             reimbursementAt !== undefined;
+
+        if (sharedAmountCents !== undefined && sharedAmountCents !== null) {
+            const effectiveTotal = purchaseUpdateData.totalAmountCents ?? purchase.totalAmountCents;
+            if (sharedAmountCents > effectiveTotal) {
+                throw new BadRequestException('sharedAmountCents cannot exceed totalAmountCents');
+            }
+        }
 
         return this.prisma.$transaction(async (tx) => {
 
@@ -535,6 +550,7 @@ export class CreditCardPurchasesService {
                 data: {
                     ...purchaseUpdateData,
                     ...(purchaseUpdateData.occurredAt && { occurredAt: new Date(purchaseUpdateData.occurredAt) }),
+                    ...(sharedAmountCents !== undefined ? { sharedAmountCents } : {}),
                 },
             });
 
@@ -785,6 +801,12 @@ export class CreditCardPurchasesService {
                 await this.deleteReimbursementMovement(tx, purchase.reimbursementMovementId);
             }
 
+            // Desreferenciar reintegros compartidos que apuntan a esta compra
+            await tx.movement.updateMany({
+                where: { sharedFromCreditCardPurchaseId: purchaseId },
+                data: { sharedFromCreditCardPurchaseId: null },
+            });
+
             await tx.creditCardInstallment.deleteMany({
                 where: { purchaseId },
             });
@@ -793,6 +815,67 @@ export class CreditCardPurchasesService {
                 where: { id: purchaseId },
                 data: { isDeleted: true, reimbursementMovementId: null },
             });
+        });
+    }
+
+    async registerSharedReimbursement(userId: number, purchaseId: number, dto: RegisterReimbursementDto) {
+        return this.prisma.$transaction(async (tx) => {
+            const purchase = await tx.creditCardPurchase.findFirst({
+                where: { id: purchaseId, userId, isDeleted: false },
+                select: {
+                    id: true, totalAmountCents: true, sharedAmountCents: true, description: true,
+                    sharedReimbursements: {
+                        where: { isDeleted: false },
+                        select: { amountCents: true },
+                    },
+                },
+            });
+
+            if (!purchase) throw new NotFoundException('Purchase not found');
+            if (!purchase.sharedAmountCents) throw new BadRequestException('Purchase is not a shared expense');
+
+            const alreadyReceived = purchase.sharedReimbursements.reduce((s, r) => s + r.amountCents, 0);
+            const pending = purchase.sharedAmountCents - alreadyReceived;
+
+            if (dto.amountCents > pending) {
+                throw new BadRequestException(`Amount exceeds pending reimbursement (${pending} cents)`);
+            }
+
+            const account = await tx.account.findFirst({
+                where: { id: dto.accountId, userId, isActive: true },
+                select: { id: true, currentBalanceCents: true },
+            });
+            if (!account) throw new BadRequestException('Account not found or inactive');
+
+            const newBalance = account.currentBalanceCents + dto.amountCents;
+
+            const movement = await tx.movement.create({
+                data: {
+                    userId,
+                    accountId: dto.accountId,
+                    type: MovementType.INCOME,
+                    amountCents: dto.amountCents,
+                    occurredAt: new Date(dto.occurredAt),
+                    description: dto.description ?? (purchase.description ? `Reintegro - ${purchase.description}` : 'Reintegro'),
+                    balanceSnapshotCents: newBalance,
+                    sharedFromCreditCardPurchaseId: purchaseId,
+                },
+            });
+
+            await tx.account.update({
+                where: { id: dto.accountId },
+                data: { currentBalanceCents: newBalance },
+            });
+
+            const newReceived = alreadyReceived + dto.amountCents;
+            return {
+                movement,
+                sharedExpense: {
+                    sharedAmountCents: purchase.sharedAmountCents,
+                    receivedAmountCents: newReceived,
+                    pendingAmountCents: purchase.sharedAmountCents - newReceived,
+                },
+            };
         });
     }
 }
