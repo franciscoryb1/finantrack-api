@@ -1,13 +1,16 @@
 import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private prisma: PrismaService,
   ) { }
 
   async register(email: string, password: string, firstName: string, lastName: string, phoneNumber?: string) {
@@ -95,6 +98,48 @@ export class AuthService {
 
   async logout(userId: number) {
     await this.usersService.updateRefreshToken(userId, null);
+  }
+
+  async forgotPassword(email: string): Promise<string | null> {
+    const user = await this.usersService.findByEmail(email);
+    if (!user || !user.isActive) return null;
+
+    // Invalidar tokens anteriores del usuario
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+
+    await this.prisma.passwordResetToken.create({
+      data: { userId: user.id, token, expiresAt },
+    });
+
+    return token;
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const record = await this.prisma.passwordResetToken.findUnique({
+      where: { token },
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('Token inválido o expirado');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: record.userId },
+      data: { passwordHash },
+    });
+
+    await this.prisma.passwordResetToken.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    });
   }
 
 }

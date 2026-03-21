@@ -3,6 +3,8 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { ChatbotApiKeyGuard } from './chatbot-api-key.guard';
 import { ResolveChatbotUserDto } from './dto/resolve-chatbot-user.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 import { Req, Res, UnauthorizedException } from '@nestjs/common';
 import type { Response } from 'express';
@@ -26,8 +28,23 @@ export class AuthController {
   }
 
   @Post('register')
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto.email, dto.password, dto.firstName, dto.lastName, dto.phoneNumber);
+  async register(@Body() dto: RegisterDto) {
+    const user = await this.authService.register(dto.email, dto.password, dto.firstName, dto.lastName, dto.phoneNumber);
+
+    try {
+      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/welcome`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
+        },
+        body: JSON.stringify({ to: dto.email, firstName: dto.firstName }),
+      });
+    } catch (e) {
+      console.error('[Auth] Error al contactar notifications service:', e);
+    }
+
+    return user;
   }
 
   @Post('login')
@@ -120,5 +137,36 @@ export class AuthController {
     res.clearCookie('refresh_token');
 
     return { message: 'Logged out' };
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    const token = await this.authService.forgotPassword(dto.email);
+
+    // Respuesta genérica siempre para no revelar si el email existe
+    if (!token) return { message: 'Si el email existe, recibirás un enlace.' };
+
+    const resetUrl = `${process.env.APP_URL}/reset-password?token=${token}`;
+
+    try {
+      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/password-reset`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
+        },
+        body: JSON.stringify({ to: dto.email, resetUrl }),
+      });
+    } catch (e) {
+      console.error('[Auth] Error al contactar notifications service:', e);
+    }
+
+    return { message: 'Si el email existe, recibirás un enlace.' };
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(dto.token, dto.newPassword);
+    return { message: 'Contraseña actualizada correctamente.' };
   }
 }
