@@ -20,7 +20,23 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    return this.usersService.create(email, passwordHash, firstName, lastName, phoneNumber);
+    const user = await this.usersService.create(email, passwordHash, firstName, lastName, phoneNumber);
+
+    const verificationToken = await this.generateVerificationToken(user.id);
+    return { user, verificationToken };
+  }
+
+  async generateVerificationToken(userId: number): Promise<string> {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
+    await this.usersService.setEmailVerificationToken(userId, token, expiresAt);
+    return token;
+  }
+
+  async resendVerificationEmail(userId: number): Promise<string | null> {
+    const user = await this.usersService.findById(userId);
+    if (user.emailVerified) return null;
+    return this.generateVerificationToken(userId);
   }
 
   async login(email: string, password: string) {

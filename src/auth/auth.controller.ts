@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, NotFoundException, ForbiddenException, Get } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, NotFoundException, ForbiddenException, Get, Query } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { ChatbotApiKeyGuard } from './chatbot-api-key.guard';
@@ -11,40 +11,83 @@ import type { Response } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { LoginDto } from './dto/login.dto';
+import { UsersService } from '../users/users.service';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private authService: AuthService,
     private jwtService: JwtService,
+    private usersService: UsersService,
   ) { }
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  me(@Req() req) {
+  async me(@Req() req) {
+    const user = await this.usersService.findById(req.user.userId);
     return {
-      user: req.user,
+      user: {
+        userId: user.id,
+        email: user.email,
+        emailVerified: user.emailVerified,
+      },
     };
   }
 
   @Post('register')
   async register(@Body() dto: RegisterDto) {
-    const user = await this.authService.register(dto.email, dto.password, dto.firstName, dto.lastName, dto.phoneNumber);
+    const { user, verificationToken } = await this.authService.register(
+      dto.email, dto.password, dto.firstName, dto.lastName, dto.phoneNumber,
+    );
+
+    const verifyUrl = `${process.env.APP_URL}/verify-email?token=${verificationToken}`;
 
     try {
-      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/welcome`, {
+      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/email-verification`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
         },
-        body: JSON.stringify({ to: dto.email, firstName: dto.firstName }),
+        body: JSON.stringify({ to: dto.email, firstName: dto.firstName, verifyUrl }),
       });
     } catch (e) {
       console.error('[Auth] Error al contactar notifications service:', e);
     }
 
     return user;
+  }
+
+  @Get('verify-email')
+  async verifyEmail(@Query('token') token: string) {
+    if (!token) throw new UnauthorizedException('Token requerido');
+    await this.usersService.verifyEmailByToken(token);
+    return { message: 'Email verificado correctamente.' };
+  }
+
+  @Post('resend-verification')
+  @UseGuards(JwtAuthGuard)
+  async resendVerification(@Req() req) {
+    const token = await this.authService.resendVerificationEmail(req.user.userId);
+    if (!token) return { message: 'El email ya está verificado.' };
+
+    const user = await this.usersService.findById(req.user.userId);
+    const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`;
+
+    try {
+      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/email-verification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
+        },
+        body: JSON.stringify({ to: user.email, firstName: user.firstName, verifyUrl }),
+      });
+    } catch (e) {
+      console.error('[Auth] Error al contactar notifications service:', e);
+    }
+
+    return { message: 'Email de verificación reenviado.' };
   }
 
   @Post('login')
@@ -143,8 +186,7 @@ export class AuthController {
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     const token = await this.authService.forgotPassword(dto.email);
 
-    // Respuesta genérica siempre para no revelar si el email existe
-    if (!token) return { message: 'Si el email existe, recibirás un enlace.' };
+    if (!token) throw new NotFoundException('No existe una cuenta asociada a ese email.');
 
     const resetUrl = `${process.env.APP_URL}/reset-password?token=${token}`;
 

@@ -132,4 +132,32 @@ export class UsersService {
     });
   }
 
+  async setEmailVerificationToken(userId: number, token: string, expiresAt: Date) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { emailVerificationToken: token, emailVerificationTokenExpiresAt: expiresAt },
+    });
+  }
+
+  async verifyEmailByToken(token: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { emailVerificationToken: token },
+    });
+
+    if (!user || !user.emailVerificationTokenExpiresAt || user.emailVerificationTokenExpiresAt < new Date()) {
+      throw new BadRequestException('Token inválido o expirado');
+    }
+
+    if (user.emailVerified) return;
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationTokenExpiresAt: null,
+      },
+    });
+  }
+
 }
