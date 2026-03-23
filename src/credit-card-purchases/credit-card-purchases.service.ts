@@ -373,13 +373,36 @@ export class CreditCardPurchasesService {
                 });
 
                 if (!stmt) {
-                    const lastStmt = await tx.creditCardStatement.findFirst({
-                        where: { creditCardId },
-                        orderBy: { sequenceNumber: 'desc' },
-                        select: { sequenceNumber: true },
+                    // Calcular sequenceNumber correcto en orden cronológico
+                    const statementsBefore = await tx.creditCardStatement.count({
+                        where: {
+                            creditCardId,
+                            OR: [
+                                { year: { lt: year } },
+                                { year, month: { lt: month } },
+                            ],
+                        },
+                    });
+                    const newSeq = statementsBefore + 1;
+
+                    // Shiftear statements existentes con seq >= newSeq para hacer lugar
+                    await tx.creditCardStatement.updateMany({
+                        where: { creditCardId, sequenceNumber: { gte: newSeq } },
+                        data: { sequenceNumber: { increment: 1 } },
                     });
 
-                    const nextSeq = lastStmt ? lastStmt.sequenceNumber + 1 : 1;
+                    // Shiftear firstStatementSequence en compras afectadas
+                    await tx.creditCardPurchase.updateMany({
+                        where: { creditCardId, firstStatementSequence: { gte: newSeq } },
+                        data: { firstStatementSequence: { increment: 1 } },
+                    });
+
+                    // Actualizar statementByKey en memoria para reflejar el shift
+                    for (const [k, v] of statementByKey.entries()) {
+                        if (v.sequenceNumber >= newSeq) {
+                            statementByKey.set(k, { ...v, sequenceNumber: v.sequenceNumber + 1 });
+                        }
+                    }
 
                     const isPast =
                         year < currentYear ||
@@ -407,7 +430,7 @@ export class CreditCardPurchasesService {
                         data: {
                             userId,
                             creditCardId,
-                            sequenceNumber: nextSeq,
+                            sequenceNumber: newSeq,
                             year,
                             month,
                             periodStartDate,
