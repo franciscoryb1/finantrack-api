@@ -49,7 +49,7 @@ export class AuthController {
           'Content-Type': 'application/json',
           'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
         },
-        body: JSON.stringify({ to: dto.email, firstName: dto.firstName, verifyUrl }),
+        body: JSON.stringify({ to: dto.email, firstName: dto.firstName ?? '', verifyUrl }),
       });
     } catch (e) {
       console.error('[Auth] Error al contactar notifications service:', e);
@@ -74,15 +74,25 @@ export class AuthController {
     const user = await this.usersService.findById(req.user.userId);
     const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`;
 
+    const notifUrl = `${process.env.NOTIFICATIONS_URL}/notifications/email-verification`;
+    console.log('[Auth] Llamando notifications service:', notifUrl);
+    console.log('[Auth] Payload:', { to: user.email, firstName: user.firstName, verifyUrl });
+
     try {
-      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/email-verification`, {
+      const res = await fetch(notifUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
         },
-        body: JSON.stringify({ to: user.email, firstName: user.firstName, verifyUrl }),
+        body: JSON.stringify({ to: user.email, firstName: user.firstName ?? '', verifyUrl }),
       });
+      if (!res.ok) {
+        const body = await res.text();
+        console.error(`[Auth] Notifications service respondió ${res.status}:`, body);
+      } else {
+        console.log('[Auth] Notifications service OK');
+      }
     } catch (e) {
       console.error('[Auth] Error al contactar notifications service:', e);
     }
