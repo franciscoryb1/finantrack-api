@@ -32,12 +32,42 @@ export class InstallmentsService {
 
         const cardIds = cards.map(c => c.id);
 
-        // 2️⃣ Statements OPEN por tarjeta
+        // 2️⃣ Statements OPEN por tarjeta — ordenados desc para quedarnos con el más reciente por tarjeta
         const openStatements = await this.prisma.creditCardStatement.findMany({
             where: {
                 userId,
                 creditCardId: { in: cardIds },
                 status: CreditCardStatementStatus.OPEN,
+            },
+            orderBy: { sequenceNumber: 'desc' },
+            select: {
+                id: true,
+                creditCardId: true,
+                sequenceNumber: true,
+                year: true,
+                month: true,
+                closingDate: true,
+                dueDate: true,
+            },
+        });
+
+        // Solo conservamos el statement más reciente por tarjeta (el primero en el array desc)
+        const openMap = new Map<number, typeof openStatements[number]>();
+        openStatements.forEach(st => {
+            if (!openMap.has(st.creditCardId)) openMap.set(st.creditCardId, st);
+        });
+
+        // 3️⃣ Statement del período actual (mes en curso) — sin importar el status
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+
+        const currentPeriodStatements = await this.prisma.creditCardStatement.findMany({
+            where: {
+                userId,
+                creditCardId: { in: cardIds },
+                year: currentYear,
+                month: currentMonth,
             },
             select: {
                 id: true,
@@ -50,10 +80,10 @@ export class InstallmentsService {
             },
         });
 
-        const openMap = new Map<number, typeof openStatements[number]>();
-        openStatements.forEach(st => openMap.set(st.creditCardId, st));
+        const currentPeriodMap = new Map<number, typeof currentPeriodStatements[number]>();
+        currentPeriodStatements.forEach(st => currentPeriodMap.set(st.creditCardId, st));
 
-        // 3️⃣ Traer cuotas activas
+        // 4️⃣ Traer cuotas activas
         const installments = await this.prisma.creditCardInstallment.findMany({
             where: {
                 userId,
@@ -82,9 +112,11 @@ export class InstallmentsService {
         const cardsOutput = cards.map(card => {
 
             const openStatement = openMap.get(card.id);
+            const currentPeriodSt = currentPeriodMap.get(card.id);
 
             let committedCents = 0;
             let openStatementAccumulatedCents = 0;
+            let currentPeriodAccumulatedCents = 0;
             let activeInstallmentsCount = 0;
 
             const cardInstallments = installments.filter(
@@ -98,18 +130,22 @@ export class InstallmentsService {
 
                 activeInstallmentsCount++;
 
-                // 🔥 Solo contar para próximo resumen si:
-                // - Existe statement OPEN
-                // - La cuota es PENDING
-                // - Pertenece al ciclo actual
+                const instSequence = inst.purchase.firstStatementSequence + inst.billingCycleOffset;
+
                 if (
                     openStatement &&
                     inst.status === 'PENDING' &&
-                    inst.purchase.firstStatementSequence + inst.billingCycleOffset ===
-                    openStatement.sequenceNumber
+                    instSequence === openStatement.sequenceNumber
                 ) {
                     openStatementAccumulatedCents += inst.amountCents;
                     totalNextStatementCents += inst.amountCents;
+                }
+
+                if (
+                    currentPeriodSt &&
+                    instSequence === currentPeriodSt.sequenceNumber
+                ) {
+                    currentPeriodAccumulatedCents += inst.amountCents;
                 }
             }
 
@@ -124,6 +160,7 @@ export class InstallmentsService {
                 availableCents: card.limitCents - committedCents,
 
                 openStatementAccumulatedCents,
+                currentPeriodAccumulatedCents,
                 activeInstallmentsCount,
 
                 openStatement: openStatement
@@ -136,6 +173,19 @@ export class InstallmentsService {
                         dueDate: openStatement.dueDate.toISOString(),
                     }
                     : null,
+
+                currentPeriodStatement: (() => {
+                    const st = currentPeriodMap.get(card.id);
+                    if (!st) return null;
+                    return {
+                        id: st.id,
+                        sequenceNumber: st.sequenceNumber,
+                        year: st.year,
+                        month: st.month,
+                        closingDate: st.closingDate.toISOString(),
+                        dueDate: st.dueDate.toISOString(),
+                    };
+                })(),
             };
         });
 

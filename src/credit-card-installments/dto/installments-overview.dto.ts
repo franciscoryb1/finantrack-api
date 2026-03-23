@@ -52,12 +52,20 @@ export class InstallmentsOverviewCardDto {
     openStatementAccumulatedCents: number;
 
     @IsInt()
+    currentPeriodAccumulatedCents: number;
+
+    @IsInt()
     activeInstallmentsCount: number;
 
     @IsOptional()
     @ValidateNested()
     @Type(() => InstallmentsOverviewStatementDto)
     openStatement: InstallmentsOverviewStatementDto | null;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => InstallmentsOverviewStatementDto)
+    currentPeriodStatement: InstallmentsOverviewStatementDto | null;
 }
 
 export class InstallmentsOverviewResponseDto {
