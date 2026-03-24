@@ -128,7 +128,7 @@ export class RecurringExpensesService {
                 categoryId,
             },
             include: {
-                category: { select: { id: true, name: true, color: true } },
+                category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true } } } },
             },
         });
     }
@@ -138,7 +138,7 @@ export class RecurringExpensesService {
             where: { userId },
             orderBy: [{ name: 'asc' }],
             include: {
-                category: { select: { id: true, name: true, color: true } },
+                category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true } } } },
                 payments: {
                     orderBy: { dueDate: 'desc' },
                     take: 1,
@@ -160,14 +160,14 @@ export class RecurringExpensesService {
             where: { id },
             data: {
                 ...(dto.name !== undefined && { name: dto.name }),
-                ...(dto.description !== undefined && { description: dto.description }),
+                ...(dto.description !== undefined && { description: dto.description || null }),
                 ...(dto.amountCents !== undefined && { amountCents: dto.amountCents }),
                 ...(dto.dueDay !== undefined && { dueDay: dto.dueDay }),
                 ...(dto.dueDayOfWeek !== undefined && { dueDayOfWeek: dto.dueDayOfWeek }),
                 ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
             },
             include: {
-                category: { select: { id: true, name: true, color: true } },
+                category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true } } } },
             },
         });
     }
@@ -194,7 +194,7 @@ export class RecurringExpensesService {
                 OR: [{ endDate: null }, { endDate: { gte: periodStart } }],
             },
             include: {
-                category: { select: { id: true, name: true, color: true } },
+                category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true } } } },
                 payments: {
                     where: {
                         dueDate: { gte: periodStart, lte: periodEnd },
