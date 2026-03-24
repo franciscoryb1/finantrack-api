@@ -237,6 +237,7 @@ model CreditCardPurchase {
   reimbursementAt          DateTime?
   reimbursementMovementId  Int?      @unique
 
+  isCredit           Boolean   @default(false)
   isDeleted          Boolean   @default(false)
 
   createdAt          DateTime  @default(now())

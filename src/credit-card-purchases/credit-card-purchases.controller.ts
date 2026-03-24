@@ -13,6 +13,7 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreditCardPurchasesService } from './credit-card-purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { CreateCreditCardCreditDto } from './dto/create-credit.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
 import { ReassignCardDto } from './dto/reassign-card.dto';
@@ -34,6 +35,11 @@ export class CreditCardPurchasesController {
     @Post()
     create(@Req() req: any, @Body() dto: CreatePurchaseDto) {
         return this.service.create(req.user.userId, dto);
+    }
+
+    @Post('credit')
+    createCredit(@Req() req: any, @Body() dto: CreateCreditCardCreditDto) {
+        return this.service.createCredit(req.user.userId, dto);
     }
 
     @Post('legacy-import')

@@ -273,6 +273,7 @@ export class InstallmentsService {
                     occurredAt: inst.purchase.occurredAt.toISOString(),
                     installmentsRemaining:
                         inst.purchase.installmentsCount - paidCount,
+                    isCredit: inst.purchase.isCredit,
                     category: inst.purchase.category
                         ? {
                               id: inst.purchase.category.id,
