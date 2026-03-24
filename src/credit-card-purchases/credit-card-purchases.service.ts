@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { CreateCreditCardCreditDto } from './dto/create-credit.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
 import { ReassignCardDto } from './dto/reassign-card.dto';
@@ -508,6 +509,107 @@ export class CreditCardPurchasesService {
                     });
                 }
             }
+
+            return purchase;
+        });
+    }
+
+    async createCredit(userId: number, dto: CreateCreditCardCreditDto) {
+        const { creditCardId, amountCents, occurredAt, description, categoryId } = dto;
+
+        await this.validateCategory(userId, categoryId);
+        await this.validateCard(userId, creditCardId);
+
+        const occurredDate = new Date(occurredAt);
+        const year = occurredDate.getUTCFullYear();
+        const month = occurredDate.getUTCMonth() + 1;
+
+        return this.prisma.$transaction(async (tx) => {
+
+            // Buscar o crear el statement para el mes/año de la devolución
+            let stmt = await tx.creditCardStatement.findUnique({
+                where: { creditCardId_year_month: { creditCardId, year, month } },
+                select: { id: true, sequenceNumber: true, status: true },
+            });
+
+            if (!stmt) {
+                const statementsBefore = await tx.creditCardStatement.count({
+                    where: {
+                        creditCardId,
+                        OR: [
+                            { year: { lt: year } },
+                            { year, month: { lt: month } },
+                        ],
+                    },
+                });
+                const newSeq = statementsBefore + 1;
+
+                await tx.creditCardStatement.updateMany({
+                    where: { creditCardId, sequenceNumber: { gte: newSeq } },
+                    data: { sequenceNumber: { increment: 1 } },
+                });
+                await tx.creditCardPurchase.updateMany({
+                    where: { creditCardId, firstStatementSequence: { gte: newSeq } },
+                    data: { firstStatementSequence: { increment: 1 } },
+                });
+
+                const now = new Date();
+                const isPast =
+                    year < now.getFullYear() ||
+                    (year === now.getFullYear() && month < now.getMonth() + 1);
+
+                const closingDate = new Date(year, month, 0);
+                const dueDate = new Date(closingDate);
+                dueDate.setDate(dueDate.getDate() + 5);
+
+                stmt = await tx.creditCardStatement.create({
+                    data: {
+                        userId,
+                        creditCardId,
+                        sequenceNumber: newSeq,
+                        year,
+                        month,
+                        periodStartDate: new Date(year, month - 1, 1),
+                        closingDate,
+                        dueDate,
+                        status: isPast
+                            ? CreditCardStatementStatus.PAID
+                            : CreditCardStatementStatus.OPEN,
+                        totalCents: 0,
+                    },
+                    select: { id: true, sequenceNumber: true, status: true },
+                });
+            }
+
+            const purchase = await tx.creditCardPurchase.create({
+                data: {
+                    userId,
+                    creditCardId,
+                    categoryId,
+                    totalAmountCents: -amountCents,
+                    installmentsCount: 1,
+                    occurredAt: occurredDate,
+                    description,
+                    firstStatementSequence: stmt.sequenceNumber,
+                    isCredit: true,
+                },
+            });
+
+            await tx.creditCardInstallment.create({
+                data: {
+                    userId,
+                    purchaseId: purchase.id,
+                    installmentNumber: 1,
+                    billingCycleOffset: 0,
+                    amountCents: -amountCents,
+                    statementId: stmt.id,
+                    year,
+                    month,
+                    status: stmt.status === CreditCardStatementStatus.OPEN
+                        ? CreditCardInstallmentStatus.PENDING
+                        : CreditCardInstallmentStatus.BILLED,
+                },
+            });
 
             return purchase;
         });
