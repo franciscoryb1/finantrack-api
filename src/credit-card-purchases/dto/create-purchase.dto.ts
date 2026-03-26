@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsOptional, IsPositive, IsString, Min } from 'class-validator';
+import { IsArray, IsDateString, IsInt, IsOptional, IsPositive, IsString, Min } from 'class-validator';
 
 export class CreatePurchaseDto {
     @IsInt()
@@ -42,4 +42,9 @@ export class CreatePurchaseDto {
     @IsInt()
     @IsPositive()
     sharedAmountCents?: number;
+
+    @IsOptional()
+    @IsArray()
+    @IsInt({ each: true })
+    tagIds?: number[];
 }

@@ -251,6 +251,7 @@ model CreditCardPurchase {
   sharedReimbursements Movement[] @relation("PurchaseSharedReimbursements")
 
   installments       CreditCardInstallment[]
+  tags               Tag[]
 
   @@index([userId, occurredAt])
   @@index([creditCardId])
@@ -394,8 +395,9 @@ model Tag {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  movements Movement[]
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movements           Movement[]
+  creditCardPurchases CreditCardPurchase[]
 
   @@unique([name, userId])
   @@index([userId])

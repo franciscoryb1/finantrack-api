@@ -170,6 +170,7 @@ export class CreditCardPurchasesService {
             orderBy: { occurredAt: 'desc' },
             include: {
                 category: { select: { id: true, name: true } },
+                tags: { select: { id: true, name: true, color: true } },
             },
         });
     }
@@ -186,6 +187,7 @@ export class CreditCardPurchasesService {
             reimbursementAccountId,
             reimbursementAt,
             sharedAmountCents,
+            tagIds,
         } = dto;
 
         await this.validateCategory(userId, categoryId);
@@ -232,14 +234,65 @@ export class CreditCardPurchasesService {
             if (openStatement) {
                 firstStatementSequence = openStatement.sequenceNumber;
             } else {
-                const lastStatement = await tx.creditCardStatement.findFirst({
-                    where: { creditCardId },
-                    orderBy: { sequenceNumber: 'desc' },
+                // No hay resumen abierto que cubra esta fecha → buscar o crear el statement del mes/año de la compra
+                const stmtYear = occurredDate.getUTCFullYear();
+                const stmtMonth = occurredDate.getUTCMonth() + 1;
+
+                let stmt = await tx.creditCardStatement.findUnique({
+                    where: { creditCardId_year_month: { creditCardId, year: stmtYear, month: stmtMonth } },
+                    select: { id: true, sequenceNumber: true },
                 });
 
-                firstStatementSequence = lastStatement
-                    ? lastStatement.sequenceNumber + 1
-                    : 1;
+                if (!stmt) {
+                    const statementsBefore = await tx.creditCardStatement.count({
+                        where: {
+                            creditCardId,
+                            OR: [
+                                { year: { lt: stmtYear } },
+                                { year: stmtYear, month: { lt: stmtMonth } },
+                            ],
+                        },
+                    });
+                    const newSeq = statementsBefore + 1;
+
+                    await tx.creditCardStatement.updateMany({
+                        where: { creditCardId, sequenceNumber: { gte: newSeq } },
+                        data: { sequenceNumber: { increment: 1 } },
+                    });
+                    await tx.creditCardPurchase.updateMany({
+                        where: { creditCardId, firstStatementSequence: { gte: newSeq } },
+                        data: { firstStatementSequence: { increment: 1 } },
+                    });
+
+                    const now = new Date();
+                    const isPast =
+                        stmtYear < now.getFullYear() ||
+                        (stmtYear === now.getFullYear() && stmtMonth < now.getMonth() + 1);
+
+                    const closingDate = new Date(stmtYear, stmtMonth, 0);
+                    const dueDate = new Date(closingDate);
+                    dueDate.setDate(dueDate.getDate() + 5);
+
+                    stmt = await tx.creditCardStatement.create({
+                        data: {
+                            userId,
+                            creditCardId,
+                            sequenceNumber: newSeq,
+                            year: stmtYear,
+                            month: stmtMonth,
+                            periodStartDate: new Date(stmtYear, stmtMonth - 1, 1),
+                            closingDate,
+                            dueDate,
+                            status: isPast
+                                ? CreditCardStatementStatus.PAID
+                                : CreditCardStatementStatus.OPEN,
+                            totalCents: 0,
+                        },
+                        select: { id: true, sequenceNumber: true },
+                    });
+                }
+
+                firstStatementSequence = stmt.sequenceNumber;
             }
 
             // crear compra
@@ -259,6 +312,7 @@ export class CreditCardPurchasesService {
                         reimbursementAccountId,
                         reimbursementAt: reimbursementAt ? new Date(reimbursementAt) : occurredDate,
                     }),
+                    ...(tagIds?.length ? { tags: { connect: tagIds.map(id => ({ id })) } } : {}),
                 },
             });
 
@@ -642,12 +696,13 @@ export class CreditCardPurchasesService {
             await this.validateCategory(userId, dto.categoryId);
         }
 
-        // Separar campos de reintegro y compartido del resto del DTO
+        // Separar campos de reintegro, compartido y tags del resto del DTO
         const {
             reimbursementAmountCents,
             reimbursementAccountId,
             reimbursementAt,
             sharedAmountCents,
+            tagIds,
             ...purchaseUpdateData
         } = dto;
 
@@ -676,6 +731,7 @@ export class CreditCardPurchasesService {
                     ...purchaseUpdateData,
                     ...(purchaseUpdateData.occurredAt && { occurredAt: new Date(purchaseUpdateData.occurredAt) }),
                     ...(sharedAmountCents !== undefined ? { sharedAmountCents } : {}),
+                    ...(tagIds !== undefined ? { tags: { set: tagIds.map(id => ({ id })) } } : {}),
                 },
             });
 
@@ -719,31 +775,29 @@ export class CreditCardPurchasesService {
 
                 const { totalAmountCents, installmentsCount } = updated;
 
-                if (installmentsCount > 1) {
-                    const baseAmount = Math.floor(totalAmountCents / installmentsCount);
-                    const remainder = totalAmountCents % installmentsCount;
+                const baseAmount = Math.floor(totalAmountCents / installmentsCount);
+                const remainder = totalAmountCents % installmentsCount;
 
-                    const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
+                const installmentsData: Prisma.CreditCardInstallmentCreateManyInput[] = [];
 
-                    for (let i = 1; i <= installmentsCount; i++) {
-                        const amount = i === 1 ? baseAmount + remainder : baseAmount;
+                for (let i = 1; i <= installmentsCount; i++) {
+                    const amount = i === 1 ? baseAmount + remainder : baseAmount;
 
-                        installmentsData.push({
-                            userId,
-                            purchaseId,
-                            installmentNumber: i,
-                            billingCycleOffset: i - 1,
-                            amountCents: amount,
-                            status: 'PENDING',
-                            year: null,
-                            month: null,
-                        });
-                    }
-
-                    await tx.creditCardInstallment.createMany({
-                        data: installmentsData,
+                    installmentsData.push({
+                        userId,
+                        purchaseId,
+                        installmentNumber: i,
+                        billingCycleOffset: i - 1,
+                        amountCents: amount,
+                        status: 'PENDING',
+                        year: null,
+                        month: null,
                     });
                 }
+
+                await tx.creditCardInstallment.createMany({
+                    data: installmentsData,
+                });
             }
 
             // ── Manejar cambios en el reintegro ──

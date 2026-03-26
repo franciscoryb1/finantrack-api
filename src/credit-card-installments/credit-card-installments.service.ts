@@ -240,6 +240,7 @@ export class InstallmentsService {
                         category: {
                             select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } },
                         },
+                        tags: { select: { id: true, name: true, color: true } },
                     },
                 },
             },
@@ -274,6 +275,7 @@ export class InstallmentsService {
                     installmentsRemaining:
                         inst.purchase.installmentsCount - paidCount,
                     isCredit: inst.purchase.isCredit,
+                    tags: inst.purchase.tags,
                     category: inst.purchase.category
                         ? {
                               id: inst.purchase.category.id,
