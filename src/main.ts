@@ -22,12 +22,16 @@ async function bootstrap() {
   app.use(cookieParser());
 
   // CORS
+  const allowedOrigins = [
+    'http://localhost:3001',
+    ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : []),
+  ];
+
   app.enableCors({
     origin: (origin, callback) => {
-      // Permitir: sin origin (curl, Postman), localhost, e IPs de red local
       if (
         !origin ||
-        origin === 'http://localhost:3001' ||
+        allowedOrigins.includes(origin) ||
         /^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin) ||
         /^http:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin)
       ) {
