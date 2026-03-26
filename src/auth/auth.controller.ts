@@ -107,16 +107,18 @@ export class AuthController {
   ) {
     const tokens = await this.authService.login(dto.email, dto.password);
 
+    const isProd = process.env.NODE_ENV === 'production';
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
+      sameSite: isProd ? 'none' : 'lax',
+      secure: isProd,
     });
 
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
+      sameSite: isProd ? 'none' : 'lax',
+      secure: isProd,
     });
 
     return tokens;
@@ -168,14 +170,18 @@ export class AuthController {
       refreshToken,
     );
 
+    const isProd = process.env.NODE_ENV === 'production';
+
     res.cookie('access_token', tokens.access_token, {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: isProd ? 'none' : 'lax',
+      secure: isProd,
     });
 
     res.cookie('refresh_token', tokens.refresh_token, {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: isProd ? 'none' : 'lax',
+      secure: isProd,
     });
 
     return tokens;
