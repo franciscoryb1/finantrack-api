@@ -218,13 +218,20 @@ export class CreditCardPurchasesService {
                 throw new BadRequestException('Credit card limit exceeded');
             }
 
-            // Buscar statement OPEN que cubra la fecha de la compra
+            // Buscar statement OPEN que cubra la fecha de la compra (comparación por fecha, sin hora)
+            // Si la compra cae el mismo día del cierre, va al siguiente período
+            const nextDayUTC = new Date(Date.UTC(
+                occurredDate.getUTCFullYear(),
+                occurredDate.getUTCMonth(),
+                occurredDate.getUTCDate() + 1,
+            ));
+
             const openStatement = await tx.creditCardStatement.findFirst({
                 where: {
                     creditCardId,
                     status: 'OPEN',
                     periodStartDate: { lte: occurredDate },
-                    closingDate: { gt: occurredDate },
+                    closingDate: { gte: nextDayUTC },
                 },
                 orderBy: { periodStartDate: 'desc' },
             });
@@ -234,9 +241,37 @@ export class CreditCardPurchasesService {
             if (openStatement) {
                 firstStatementSequence = openStatement.sequenceNumber;
             } else {
-                // No hay resumen abierto que cubra esta fecha → buscar o crear el statement del mes/año de la compra
-                const stmtYear = occurredDate.getUTCFullYear();
-                const stmtMonth = occurredDate.getUTCMonth() + 1;
+                // No hay resumen abierto que cubra esta fecha → determinar el período correcto por fecha
+                const purchaseDay = occurredDate.getUTCDate();
+                const purchaseMon = occurredDate.getUTCMonth() + 1;
+                const purchaseYr = occurredDate.getUTCFullYear();
+
+                // Si la compra cae en el día de cierre o después, corresponde al siguiente período
+                const thisMonthStmt = await tx.creditCardStatement.findUnique({
+                    where: { creditCardId_year_month: { creditCardId, year: purchaseYr, month: purchaseMon } },
+                    select: { id: true, sequenceNumber: true, closingDate: true },
+                });
+
+                let stmtYear = purchaseYr;
+                let stmtMonth = purchaseMon;
+
+                if (thisMonthStmt) {
+                    if (purchaseDay >= thisMonthStmt.closingDate.getUTCDate()) {
+                        stmtMonth = purchaseMon === 12 ? 1 : purchaseMon + 1;
+                        stmtYear = purchaseMon === 12 ? purchaseYr + 1 : purchaseYr;
+                    }
+                } else {
+                    // Sin resumen para este mes — inferir día de cierre del resumen más reciente
+                    const lastStmt = await tx.creditCardStatement.findFirst({
+                        where: { creditCardId },
+                        orderBy: [{ year: 'desc' }, { month: 'desc' }],
+                        select: { closingDate: true },
+                    });
+                    if (lastStmt && purchaseDay >= lastStmt.closingDate.getUTCDate()) {
+                        stmtMonth = purchaseMon === 12 ? 1 : purchaseMon + 1;
+                        stmtYear = purchaseMon === 12 ? purchaseYr + 1 : purchaseYr;
+                    }
+                }
 
                 let stmt = await tx.creditCardStatement.findUnique({
                     where: { creditCardId_year_month: { creditCardId, year: stmtYear, month: stmtMonth } },
