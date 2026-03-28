@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsPositive } from 'class-validator';
+import { IsDateString, IsInt, IsOptional, IsPositive, Min } from 'class-validator';
 
 export class PayRecurringExpenseDto {
     @IsDateString()
@@ -11,6 +11,16 @@ export class PayRecurringExpenseDto {
     @IsDateString()
     occurredAt: string;
 
+    @IsOptional()
     @IsInt()
-    accountId: number;
+    accountId?: number;
+
+    @IsOptional()
+    @IsInt()
+    creditCardId?: number;
+
+    @IsOptional()
+    @IsInt()
+    @Min(1)
+    installmentsCount?: number;
 }

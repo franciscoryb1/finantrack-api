@@ -252,6 +252,7 @@ model CreditCardPurchase {
 
   installments       CreditCardInstallment[]
   tags               Tag[]
+  recurringPayment   RecurringExpensePayment?
 
   @@index([userId, occurredAt])
   @@index([creditCardId])
@@ -404,15 +405,17 @@ model Tag {
 }
 
 model RecurringExpensePayment {
-  id                 Int              @id @default(autoincrement())
-  recurringExpenseId Int
-  movementId         Int              @unique
-  dueDate            DateTime
-  amountCents        Int
-  createdAt          DateTime         @default(now())
+  id                   Int                 @id @default(autoincrement())
+  recurringExpenseId   Int
+  movementId           Int?                @unique
+  creditCardPurchaseId Int?                @unique
+  dueDate              DateTime
+  amountCents          Int
+  createdAt            DateTime            @default(now())
 
-  recurringExpense   RecurringExpense @relation(fields: [recurringExpenseId], references: [id], onDelete: Cascade)
-  movement           Movement         @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  recurringExpense     RecurringExpense    @relation(fields: [recurringExpenseId], references: [id], onDelete: Cascade)
+  movement             Movement?           @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  creditCardPurchase   CreditCardPurchase? @relation(fields: [creditCardPurchaseId], references: [id], onDelete: Restrict)
 
   @@index([recurringExpenseId])
   @@unique([recurringExpenseId, dueDate])

@@ -11,10 +11,14 @@ import { CreateRecurringExpenseDto } from './dto/create-recurring-expense.dto';
 import { UpdateRecurringExpenseDto } from './dto/update-recurring-expense.dto';
 import { PayRecurringExpenseDto } from './dto/pay-recurring-expense.dto';
 import { GetUpcomingDto } from './dto/get-upcoming.dto';
+import { CreditCardPurchasesService } from '../credit-card-purchases/credit-card-purchases.service';
 
 @Injectable()
 export class RecurringExpensesService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly creditCardPurchasesService: CreditCardPurchasesService,
+    ) { }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -207,6 +211,12 @@ export class RecurringExpensesService {
                                 account: { select: { id: true, name: true } },
                             },
                         },
+                        creditCardPurchase: {
+                            select: {
+                                id: true,
+                                creditCard: { select: { id: true, name: true } },
+                            },
+                        },
                     },
                 },
             },
@@ -217,7 +227,15 @@ export class RecurringExpensesService {
             recurringExpense: any;
             dueDate: string;
             status: 'PAID' | 'PENDING' | 'OVERDUE';
-            payment?: { id: number; amountCents: number; movementId: number; createdAt: Date; accountName?: string };
+            payment?: {
+                id: number;
+                amountCents: number;
+                movementId?: number | null;
+                creditCardPurchaseId?: number | null;
+                createdAt: Date;
+                accountName?: string;
+                creditCardName?: string;
+            };
         }> = [];
 
         for (const expense of expenses) {
@@ -259,8 +277,10 @@ export class RecurringExpensesService {
                               id: payment.id,
                               amountCents: payment.amountCents,
                               movementId: payment.movementId,
+                              creditCardPurchaseId: payment.creditCardPurchaseId,
                               createdAt: payment.createdAt,
                               accountName: payment.movement?.account?.name,
+                              creditCardName: payment.creditCardPurchase?.creditCard?.name,
                           }
                         : undefined,
                 });
@@ -275,7 +295,11 @@ export class RecurringExpensesService {
     // ── Pay ───────────────────────────────────────────────────────────────────
 
     async pay(userId: number, id: number, dto: PayRecurringExpenseDto) {
-        const { dueDate, amountCents, occurredAt, accountId } = dto;
+        const { dueDate, amountCents, occurredAt, accountId, creditCardId, installmentsCount } = dto;
+
+        if (!accountId && !creditCardId) {
+            throw new BadRequestException('Either accountId or creditCardId must be provided');
+        }
 
         const expense = await this.prisma.recurringExpense.findFirst({
             where: { id, userId },
@@ -291,9 +315,33 @@ export class RecurringExpensesService {
         });
         if (existing) throw new ConflictException('This occurrence has already been paid');
 
+        if (creditCardId) {
+            // Pago con tarjeta de crédito: crea una compra con cuotas
+            const purchase = await this.creditCardPurchasesService.create(userId, {
+                creditCardId,
+                categoryId: expense.categoryId ?? undefined,
+                totalAmountCents: amountCents,
+                installmentsCount: installmentsCount ?? 1,
+                occurredAt,
+                description: expense.name,
+            } as any);
+
+            const payment = await this.prisma.recurringExpensePayment.create({
+                data: {
+                    recurringExpenseId: id,
+                    creditCardPurchaseId: purchase.id,
+                    dueDate: dueDateObj,
+                    amountCents,
+                },
+            });
+
+            return { payment, purchase };
+        }
+
+        // Pago con cuenta (flujo original)
         return this.prisma.$transaction(async (tx) => {
             const account = await tx.account.findFirst({
-                where: { id: accountId, userId, isActive: true },
+                where: { id: accountId!, userId, isActive: true },
                 select: { id: true, currentBalanceCents: true },
             });
             if (!account) throw new ForbiddenException('Account not found or inactive');
@@ -304,7 +352,7 @@ export class RecurringExpensesService {
             const movement = await tx.movement.create({
                 data: {
                     userId,
-                    accountId,
+                    accountId: accountId!,
                     categoryId: expense.categoryId,
                     type: MovementType.EXPENSE,
                     amountCents,
@@ -315,7 +363,7 @@ export class RecurringExpensesService {
             });
 
             await tx.account.update({
-                where: { id: accountId },
+                where: { id: accountId! },
                 data: { currentBalanceCents: newBalance },
             });
 
