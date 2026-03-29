@@ -1,18 +1,8 @@
-/*
-  Warnings:
-
-  - A unique constraint covering the columns `[creditCardPurchaseId]` on the table `RecurringExpensePayment` will be added. If there are existing duplicate values, this will fail.
-
-*/
 -- CreateEnum
 CREATE TYPE "NotificationType" AS ENUM ('EMAIL_VERIFICATION', 'PASSWORD_RESET', 'WELCOME');
 
 -- CreateEnum
 CREATE TYPE "NotificationStatus" AS ENUM ('PENDING', 'QUEUED', 'SENT', 'FAILED');
-
--- AlterTable
-ALTER TABLE "RecurringExpensePayment" ADD COLUMN     "creditCardPurchaseId" INTEGER,
-ALTER COLUMN "movementId" DROP NOT NULL;
 
 -- CreateTable
 CREATE TABLE "Notification" (
@@ -39,12 +29,6 @@ CREATE INDEX "Notification_status_idx" ON "Notification"("status");
 
 -- CreateIndex
 CREATE INDEX "Notification_jobId_idx" ON "Notification"("jobId");
-
--- CreateIndex
-CREATE UNIQUE INDEX "RecurringExpensePayment_creditCardPurchaseId_key" ON "RecurringExpensePayment"("creditCardPurchaseId");
-
--- AddForeignKey
-ALTER TABLE "RecurringExpensePayment" ADD CONSTRAINT "RecurringExpensePayment_creditCardPurchaseId_fkey" FOREIGN KEY ("creditCardPurchaseId") REFERENCES "CreditCardPurchase"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
