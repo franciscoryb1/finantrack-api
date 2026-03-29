@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, NotFoundException, ForbiddenException, Get, Query } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, NotFoundException, ForbiddenException, Get, Query, Logger } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { ChatbotApiKeyGuard } from './chatbot-api-key.guard';
@@ -15,6 +15,8 @@ import { UsersService } from '../users/users.service';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private authService: AuthService,
     private jwtService: JwtService,
@@ -52,7 +54,7 @@ export class AuthController {
         body: JSON.stringify({ to: dto.email, firstName: dto.firstName ?? '', verifyUrl }),
       });
     } catch (e) {
-      console.error('[Auth] Error al contactar notifications service:', e);
+      this.logger.error(`Error al enviar email de verificación a ${dto.email}`, e instanceof Error ? e.stack : String(e));
     }
 
     return user;
@@ -75,11 +77,9 @@ export class AuthController {
     const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`;
 
     const notifUrl = `${process.env.NOTIFICATIONS_URL}/notifications/email-verification`;
-    console.log('[Auth] Llamando notifications service:', notifUrl);
-    console.log('[Auth] Payload:', { to: user.email, firstName: user.firstName, verifyUrl });
 
     try {
-      const res = await fetch(notifUrl, {
+      const notifRes = await fetch(notifUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -87,14 +87,12 @@ export class AuthController {
         },
         body: JSON.stringify({ to: user.email, firstName: user.firstName ?? '', verifyUrl }),
       });
-      if (!res.ok) {
-        const body = await res.text();
-        console.error(`[Auth] Notifications service respondió ${res.status}:`, body);
-      } else {
-        console.log('[Auth] Notifications service OK');
+      if (!notifRes.ok) {
+        const body = await notifRes.text();
+        this.logger.error(`Error al reenviar email de verificación a ${user.email} — HTTP ${notifRes.status}: ${body}`);
       }
     } catch (e) {
-      console.error('[Auth] Error al contactar notifications service:', e);
+      this.logger.error(`Error al contactar notifications service (reenvío verificación) para ${user.email}`, e instanceof Error ? e.stack : String(e));
     }
 
     return { message: 'Email de verificación reenviado.' };
@@ -216,7 +214,7 @@ export class AuthController {
         body: JSON.stringify({ to: dto.email, resetUrl }),
       });
     } catch (e) {
-      console.error('[Auth] Error al contactar notifications service:', e);
+      this.logger.error(`Error al enviar email de reset de contraseña a ${dto.email}`, e instanceof Error ? e.stack : String(e));
     }
 
     return { message: 'Si el email existe, recibirás un enlace.' };
