@@ -42,6 +42,8 @@ export class AuthController {
       dto.email, dto.password, dto.firstName, dto.lastName, dto.phoneNumber,
     );
 
+    this.logger.log(`Usuario registrado — id=${user.id} email=${dto.email}`);
+
     const verifyUrl = `${process.env.APP_URL}/verify-email?token=${verificationToken}`;
 
     try {
@@ -53,6 +55,7 @@ export class AuthController {
         },
         body: JSON.stringify({ to: dto.email, firstName: dto.firstName ?? '', verifyUrl }),
       });
+      this.logger.log(`Email de verificación enviado — id=${user.id} email=${dto.email}`);
     } catch (e) {
       this.logger.error(`Error al enviar email de verificación a ${dto.email}`, e instanceof Error ? e.stack : String(e));
     }
@@ -63,7 +66,8 @@ export class AuthController {
   @Get('verify-email')
   async verifyEmail(@Query('token') token: string) {
     if (!token) throw new UnauthorizedException('Token requerido');
-    await this.usersService.verifyEmailByToken(token);
+    const user = await this.usersService.verifyEmailByToken(token);
+    this.logger.log(`Email verificado — id=${user.id} email=${user.email}`);
     return { message: 'Email verificado correctamente.' };
   }
 
@@ -90,6 +94,8 @@ export class AuthController {
       if (!notifRes.ok) {
         const body = await notifRes.text();
         this.logger.error(`Error al reenviar email de verificación a ${user.email} — HTTP ${notifRes.status}: ${body}`);
+      } else {
+        this.logger.log(`Email de verificación reenviado — id=${user.id} email=${user.email}`);
       }
     } catch (e) {
       this.logger.error(`Error al contactar notifications service (reenvío verificación) para ${user.email}`, e instanceof Error ? e.stack : String(e));
@@ -103,7 +109,14 @@ export class AuthController {
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const tokens = await this.authService.login(dto.email, dto.password);
+    let tokens: { access_token: string; refresh_token: string };
+
+    try {
+      tokens = await this.authService.login(dto.email, dto.password);
+    } catch (e) {
+      this.logger.warn(`Login fallido — email=${dto.email}`);
+      throw e;
+    }
 
     const isProd = process.env.NODE_ENV === 'production';
 
@@ -118,6 +131,8 @@ export class AuthController {
       sameSite: isProd ? 'none' : 'lax',
       secure: isProd,
     });
+
+    this.logger.log(`Login exitoso — email=${dto.email}`);
 
     return tokens;
   }
@@ -143,7 +158,6 @@ export class AuthController {
     };
   }
 
-
   @Post('refresh')
   async refresh(@Req() req, @Res({ passthrough: true }) res: Response) {
     const refreshToken =
@@ -168,6 +182,8 @@ export class AuthController {
       refreshToken,
     );
 
+    this.logger.log(`Token renovado — id=${decoded.sub}`);
+
     const isProd = process.env.NODE_ENV === 'production';
 
     res.cookie('access_token', tokens.access_token, {
@@ -190,6 +206,8 @@ export class AuthController {
   async logout(@Req() req, @Res({ passthrough: true }) res: Response) {
     await this.authService.logout(req.user.userId);
 
+    this.logger.log(`Logout — id=${req.user.userId}`);
+
     res.clearCookie('access_token');
     res.clearCookie('refresh_token');
 
@@ -202,6 +220,8 @@ export class AuthController {
 
     if (!token) throw new NotFoundException('No existe una cuenta asociada a ese email.');
 
+    this.logger.log(`Reset de contraseña solicitado — email=${dto.email}`);
+
     const resetUrl = `${process.env.APP_URL}/reset-password?token=${token}`;
 
     try {
@@ -213,6 +233,7 @@ export class AuthController {
         },
         body: JSON.stringify({ to: dto.email, resetUrl }),
       });
+      this.logger.log(`Email de reset de contraseña enviado — email=${dto.email}`);
     } catch (e) {
       this.logger.error(`Error al enviar email de reset de contraseña a ${dto.email}`, e instanceof Error ? e.stack : String(e));
     }
@@ -223,6 +244,7 @@ export class AuthController {
   @Post('reset-password')
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto.token, dto.newPassword);
+    this.logger.log(`Contraseña reseteada exitosamente`);
     return { message: 'Contraseña actualizada correctamente.' };
   }
 }

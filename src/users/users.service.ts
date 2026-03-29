@@ -148,7 +148,7 @@ export class UsersService {
       throw new BadRequestException('Token inválido o expirado');
     }
 
-    if (user.emailVerified) return;
+    if (user.emailVerified) return user;
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -158,6 +158,8 @@ export class UsersService {
         emailVerificationTokenExpiresAt: null,
       },
     });
+
+    return user;
   }
 
 }
