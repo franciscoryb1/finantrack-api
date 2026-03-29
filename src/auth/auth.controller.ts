@@ -5,13 +5,13 @@ import { ChatbotApiKeyGuard } from './chatbot-api-key.guard';
 import { ResolveChatbotUserDto } from './dto/resolve-chatbot-user.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-
 import { Req, Res, UnauthorizedException } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Controller('auth')
 export class AuthController {
@@ -21,6 +21,7 @@ export class AuthController {
     private authService: AuthService,
     private jwtService: JwtService,
     private usersService: UsersService,
+    private notificationsService: NotificationsService,
   ) { }
 
   @Get('me')
@@ -45,20 +46,7 @@ export class AuthController {
     this.logger.log(`Usuario registrado — id=${user.id} email=${dto.email}`);
 
     const verifyUrl = `${process.env.APP_URL}/verify-email?token=${verificationToken}`;
-
-    try {
-      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/email-verification`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
-        },
-        body: JSON.stringify({ to: dto.email, firstName: dto.firstName ?? '', verifyUrl }),
-      });
-      this.logger.log(`Email de verificación enviado — id=${user.id} email=${dto.email}`);
-    } catch (e) {
-      this.logger.error(`Error al enviar email de verificación a ${dto.email}`, e instanceof Error ? e.stack : String(e));
-    }
+    await this.notificationsService.sendEmailVerification(user.id, dto.email, dto.firstName ?? '', verifyUrl);
 
     return user;
   }
@@ -80,26 +68,7 @@ export class AuthController {
     const user = await this.usersService.findById(req.user.userId);
     const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`;
 
-    const notifUrl = `${process.env.NOTIFICATIONS_URL}/notifications/email-verification`;
-
-    try {
-      const notifRes = await fetch(notifUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
-        },
-        body: JSON.stringify({ to: user.email, firstName: user.firstName ?? '', verifyUrl }),
-      });
-      if (!notifRes.ok) {
-        const body = await notifRes.text();
-        this.logger.error(`Error al reenviar email de verificación a ${user.email} — HTTP ${notifRes.status}: ${body}`);
-      } else {
-        this.logger.log(`Email de verificación reenviado — id=${user.id} email=${user.email}`);
-      }
-    } catch (e) {
-      this.logger.error(`Error al contactar notifications service (reenvío verificación) para ${user.email}`, e instanceof Error ? e.stack : String(e));
-    }
+    await this.notificationsService.sendEmailVerification(user.id, user.email, user.firstName ?? '', verifyUrl);
 
     return { message: 'Email de verificación reenviado.' };
   }
@@ -177,10 +146,7 @@ export class AuthController {
       throw new UnauthorizedException();
     }
 
-    const tokens = await this.authService.refreshTokens(
-      decoded.sub,
-      refreshToken,
-    );
+    const tokens = await this.authService.refreshTokens(decoded.sub, refreshToken);
 
     this.logger.log(`Token renovado — id=${decoded.sub}`);
 
@@ -222,21 +188,9 @@ export class AuthController {
 
     this.logger.log(`Reset de contraseña solicitado — email=${dto.email}`);
 
+    const user = await this.usersService.findByEmail(dto.email);
     const resetUrl = `${process.env.APP_URL}/reset-password?token=${token}`;
-
-    try {
-      await fetch(`${process.env.NOTIFICATIONS_URL}/notifications/password-reset`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
-        },
-        body: JSON.stringify({ to: dto.email, resetUrl }),
-      });
-      this.logger.log(`Email de reset de contraseña enviado — email=${dto.email}`);
-    } catch (e) {
-      this.logger.error(`Error al enviar email de reset de contraseña a ${dto.email}`, e instanceof Error ? e.stack : String(e));
-    }
+    await this.notificationsService.sendPasswordReset(user!.id, dto.email, resetUrl);
 
     return { message: 'Si el email existe, recibirás un enlace.' };
   }

@@ -16,6 +16,8 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { AccountTransfersModule } from './account-transfers/account-transfers.module';
 import { RecurringExpensesModule } from './recurring-expenses/recurring-expenses.module';
 import { TagsModule } from './tags/tags.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { TagsModule } from './tags/tags.module';
     AccountTransfersModule,
     RecurringExpensesModule,
     TagsModule,
+    NotificationsModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],
