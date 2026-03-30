@@ -19,6 +19,13 @@ export class AuthService {
       throw new BadRequestException('Email already registered');
     }
 
+    if (phoneNumber) {
+      const existingPhone = await this.usersService.findByPhone(phoneNumber);
+      if (existingPhone) {
+        throw new BadRequestException('Phone already registered');
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await this.usersService.create(email, passwordHash, firstName, lastName, phoneNumber);
 
