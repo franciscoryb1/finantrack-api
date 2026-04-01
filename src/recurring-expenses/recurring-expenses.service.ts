@@ -168,7 +168,10 @@ export class RecurringExpensesService {
                 ...(dto.amountCents !== undefined && { amountCents: dto.amountCents }),
                 ...(dto.dueDay !== undefined && { dueDay: dto.dueDay }),
                 ...(dto.dueDayOfWeek !== undefined && { dueDayOfWeek: dto.dueDayOfWeek }),
+                ...(dto.frequency !== undefined && { frequency: dto.frequency }),
                 ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
+                ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
+                ...(dto.endDate !== undefined && { endDate: dto.endDate ? new Date(dto.endDate) : null }),
             },
             include: {
                 category: { select: { id: true, name: true, color: true, parent: { select: { id: true, name: true } } } },

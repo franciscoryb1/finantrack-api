@@ -1,4 +1,5 @@
-import { IsInt, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
+import { RecurringFrequency } from '@prisma/client';
 
 export class UpdateRecurringExpenseDto {
     @IsOptional()
@@ -27,6 +28,18 @@ export class UpdateRecurringExpenseDto {
     dueDayOfWeek?: number;
 
     @IsOptional()
+    @IsEnum(RecurringFrequency)
+    frequency?: RecurringFrequency;
+
+    @IsOptional()
     @IsInt()
     categoryId?: number;
+
+    @IsOptional()
+    @IsDateString()
+    startDate?: string;
+
+    @IsOptional()
+    @IsDateString()
+    endDate?: string | null;
 }
