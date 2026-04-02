@@ -7,6 +7,7 @@ import {
     ParseIntPipe,
     Patch,
     Post,
+    Query,
     Req,
     UseGuards,
 } from '@nestjs/common';
@@ -18,11 +19,17 @@ import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
 import { ReassignCardDto } from './dto/reassign-card.dto';
 import { RegisterReimbursementDto } from './dto/register-reimbursement.dto';
+import { ListByDateRangeDto } from './dto/list-by-date-range.dto';
 
 @Controller('credit-card-purchases')
 @UseGuards(JwtAuthGuard)
 export class CreditCardPurchasesController {
     constructor(private readonly service: CreditCardPurchasesService) { }
+
+    @Get()
+    listByDateRange(@Req() req: any, @Query() dto: ListByDateRangeDto) {
+        return this.service.listByDateRange(req.user.userId, dto.fromDate, dto.toDate);
+    }
 
     @Get('card/:cardId')
     listByCard(

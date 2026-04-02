@@ -160,6 +160,32 @@ export class CreditCardPurchasesService {
 
     // ---------- core ----------
 
+    async listByDateRange(userId: number, fromDate: string, toDate: string) {
+        const from = new Date(fromDate);
+        const to = new Date(toDate);
+        to.setUTCHours(23, 59, 59, 999);
+
+        return this.prisma.creditCardPurchase.findMany({
+            where: {
+                userId,
+                isDeleted: false,
+                occurredAt: { gte: from, lte: to },
+            },
+            orderBy: { occurredAt: 'desc' },
+            include: {
+                category: {
+                    select: {
+                        id: true, name: true, color: true,
+                        parent: { select: { id: true, name: true, color: true } },
+                    },
+                },
+                creditCard: {
+                    select: { id: true, name: true, cardLast4: true, brand: true },
+                },
+            },
+        });
+    }
+
     async listByCard(userId: number, creditCardId: number) {
         return this.prisma.creditCardPurchase.findMany({
             where: {
