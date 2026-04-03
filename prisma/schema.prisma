@@ -312,10 +312,22 @@ model CreditCardStatement {
 
   installments    CreditCardInstallment[]
   payments        CreditCardPayment[]
+  extras          CreditCardStatementExtra[]
 
   @@unique([creditCardId, year, month])
   @@index([userId])
   @@index([creditCardId, status])
+}
+
+model CreditCardStatementExtra {
+  id          Int                  @id @default(autoincrement())
+  statementId Int
+  description String
+  amountCents Int
+
+  statement   CreditCardStatement  @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId])
 }
 
 model CreditCardPayment {
@@ -334,7 +346,6 @@ model CreditCardPayment {
   statement        CreditCardStatement @relation(fields: [statementId], references: [id], onDelete: Restrict)
   paidFromAccount  Account   @relation(fields: [paidFromAccountId], references: [id], onDelete: Restrict)
   movement         Movement? @relation(fields: [movementId], references: [id], onDelete: SetNull)
-
   @@index([userId])
   @@index([statementId])
   @@index([paidFromAccountId])
