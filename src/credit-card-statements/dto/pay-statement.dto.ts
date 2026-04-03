@@ -1,4 +1,3 @@
-// dto/pay-statement.dto.ts
 import { IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class PayStatementDto {
@@ -11,5 +10,5 @@ export class PayStatementDto {
     description?: string;
 
     @IsOptional()
-    paidAt?: string; // ISO
+    paidAt?: string;
 }

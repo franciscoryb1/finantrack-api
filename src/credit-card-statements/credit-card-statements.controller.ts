@@ -1,6 +1,7 @@
 import {
     Body,
     Controller,
+    Delete,
     Param,
     ParseIntPipe,
     Post,
@@ -8,12 +9,14 @@ import {
     Req,
     UseGuards,
     Get,
+    HttpCode,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreditCardStatementsService } from './credit-card-statements.service';
 import { CreateStatementDto } from './dto/create-statement.dto';
 import { PayStatementDto } from './dto/pay-statement.dto';
 import { UpdateStatementDatesDto } from './dto/update-statement-dates.dto';
+import { StatementExtraDto } from './dto/statement-extra.dto';
 
 @Controller('credit-card-statements')
 @UseGuards(JwtAuthGuard)
@@ -65,6 +68,25 @@ export class CreditCardStatementsController {
         @Body() dto: PayStatementDto,
     ) {
         return this.service.pay(req.user.userId, id, dto);
+    }
+
+    @Post(':id/extras')
+    addExtra(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: StatementExtraDto,
+    ) {
+        return this.service.addExtra(req.user.userId, id, dto);
+    }
+
+    @Delete(':id/extras/:extraId')
+    @HttpCode(204)
+    removeExtra(
+        @Req() req: any,
+        @Param('id', ParseIntPipe) id: number,
+        @Param('extraId', ParseIntPipe) extraId: number,
+    ) {
+        return this.service.removeExtra(req.user.userId, id, extraId);
     }
 
 }

@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateStatementDto } from './dto/create-statement.dto';
 import { AccountType, CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
 import { PayStatementDto } from './dto/pay-statement.dto';
+import { StatementExtraDto } from './dto/statement-extra.dto';
 import { UpdateStatementDatesDto } from './dto/update-statement-dates.dto';
 
 @Injectable()
@@ -281,6 +282,38 @@ export class CreditCardStatementsService {
     }
 
 
+    async addExtra(userId: number, statementId: number, dto: StatementExtraDto) {
+        const statement = await this.prisma.creditCardStatement.findUnique({
+            where: { id: statementId },
+        });
+
+        if (!statement) throw new NotFoundException('Statement not found');
+        if (statement.userId !== userId) throw new ForbiddenException();
+        if (statement.status !== CreditCardStatementStatus.CLOSED) {
+            throw new BadRequestException('Only closed statements can have extras added');
+        }
+
+        return this.prisma.creditCardStatementExtra.create({
+            data: { statementId, description: dto.description, amountCents: dto.amountCents },
+        });
+    }
+
+    async removeExtra(userId: number, statementId: number, extraId: number) {
+        const extra = await this.prisma.creditCardStatementExtra.findUnique({
+            where: { id: extraId },
+            include: { statement: { select: { userId: true, status: true } } },
+        });
+
+        if (!extra) throw new NotFoundException('Extra not found');
+        if (extra.statement.userId !== userId) throw new ForbiddenException();
+        if (extra.statementId !== statementId) throw new BadRequestException('Extra does not belong to this statement');
+        if (extra.statement.status !== CreditCardStatementStatus.CLOSED) {
+            throw new BadRequestException('Only closed statements can have extras removed');
+        }
+
+        await this.prisma.creditCardStatementExtra.delete({ where: { id: extraId } });
+    }
+
     async pay(
         userId: number,
         statementId: number,
@@ -290,29 +323,28 @@ export class CreditCardStatementsService {
 
         return this.prisma.$transaction(async (tx) => {
 
-            // 1️⃣ Traer statement
+            // 1️⃣ Traer statement con sus extras
             const statement = await tx.creditCardStatement.findUnique({
                 where: { id: statementId },
+                include: { extras: true },
             });
 
-            if (!statement) {
-                throw new NotFoundException('Statement not found');
-            }
-
-            if (statement.userId !== userId) {
-                throw new ForbiddenException();
-            }
+            if (!statement) throw new NotFoundException('Statement not found');
+            if (statement.userId !== userId) throw new ForbiddenException();
 
             if (statement.status === CreditCardStatementStatus.OPEN) {
                 throw new BadRequestException('Statement is not closed');
             }
-
             if (statement.status === CreditCardStatementStatus.PAID) {
                 throw new BadRequestException('Statement already paid');
             }
 
-            if (statement.totalCents <= 0) {
-                throw new BadRequestException('Statement total is zero');
+            // Total real = cuotas del resumen + conceptos adicionales (pueden ser negativos)
+            const extrasTotalCents = statement.extras.reduce((sum, e) => sum + e.amountCents, 0);
+            const totalPaymentCents = statement.totalCents + extrasTotalCents;
+
+            if (totalPaymentCents <= 0) {
+                throw new BadRequestException('El total a pagar debe ser mayor a cero');
             }
 
             // 2️⃣ Validar cuenta de pago
@@ -321,36 +353,27 @@ export class CreditCardStatementsService {
                     id: accountId,
                     userId,
                     isActive: true,
-                    type: {
-                        in: [
-                            AccountType.CASH,
-                            AccountType.BANK,
-                            AccountType.WALLET,
-                        ],
-                    },
+                    type: { in: [AccountType.CASH, AccountType.BANK, AccountType.WALLET] },
                 },
             });
 
             if (!account) {
-                throw new BadRequestException(
-                    'Payment account must be CASH, BANK or WALLET',
-                );
+                throw new BadRequestException('Payment account must be CASH, BANK or WALLET');
             }
 
-            // 3️⃣ Crear movimiento (EXPENSE)
-            const newBalance =
-                account.currentBalanceCents - statement.totalCents;
+            // 3️⃣ Crear movimiento
+            const newBalance = account.currentBalanceCents - totalPaymentCents;
 
             if (newBalance < 0) {
                 throw new BadRequestException('Insufficient account balance');
             }
 
-            await tx.movement.create({
+            const movement = await tx.movement.create({
                 data: {
                     userId,
                     accountId,
                     type: 'STATEMENT_PAYMENT',
-                    amountCents: statement.totalCents,
+                    amountCents: totalPaymentCents,
                     occurredAt: paidAt ? new Date(paidAt) : new Date(),
                     description:
                         description ??
@@ -364,23 +387,28 @@ export class CreditCardStatementsService {
                 data: { currentBalanceCents: newBalance },
             });
 
-            // 4️⃣ Marcar cuotas como PAID
-            await tx.creditCardInstallment.updateMany({
-                where: {
-                    statementId: statement.id,
-                    status: CreditCardInstallmentStatus.BILLED,
-                },
+            // 4️⃣ Crear registro de pago
+            await tx.creditCardPayment.create({
                 data: {
-                    status: CreditCardInstallmentStatus.PAID,
+                    userId,
+                    statementId: statement.id,
+                    paidFromAccountId: accountId,
+                    movementId: movement.id,
+                    amountCents: totalPaymentCents,
+                    paidAt: paidAt ? new Date(paidAt) : new Date(),
                 },
             });
 
-            // 5️⃣ Marcar statement como PAID
+            // 5️⃣ Marcar cuotas como PAID
+            await tx.creditCardInstallment.updateMany({
+                where: { statementId: statement.id, status: CreditCardInstallmentStatus.BILLED },
+                data: { status: CreditCardInstallmentStatus.PAID },
+            });
+
+            // 6️⃣ Marcar statement como PAID
             return tx.creditCardStatement.update({
                 where: { id: statement.id },
-                data: {
-                    status: CreditCardStatementStatus.PAID,
-                },
+                data: { status: CreditCardStatementStatus.PAID },
             });
         });
     }

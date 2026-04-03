@@ -227,6 +227,22 @@ export class InstallmentsService {
 
         if (!statement) throw new Error('Statement not found');
 
+        const extras = await this.prisma.creditCardStatementExtra.findMany({
+            where: { statementId: statement.id },
+            select: { id: true, description: true, amountCents: true },
+            orderBy: { id: 'asc' },
+        });
+
+        const payment = await this.prisma.creditCardPayment.findFirst({
+            where: { statementId: statement.id },
+            select: {
+                id: true,
+                amountCents: true,
+                paidAt: true,
+                paidFromAccount: { select: { id: true, name: true } },
+            },
+        });
+
         const allInstallments = await this.prisma.creditCardInstallment.findMany({
             where: {
                 purchase: {
@@ -306,6 +322,15 @@ export class InstallmentsService {
                 dueDate: statement.dueDate.toISOString(),
                 status: statement.status,
             },
+            extras,
+            payment: payment
+                ? {
+                    id: payment.id,
+                    amountCents: payment.amountCents,
+                    paidAt: payment.paidAt.toISOString(),
+                    account: { id: payment.paidFromAccount.id, name: payment.paidFromAccount.name },
+                }
+                : null,
             purchases: Array.from(purchasesMap.values()),
         };
     }
@@ -328,20 +353,24 @@ export class InstallmentsService {
                 { month: 'desc' },
             ],
             select: {
+                id: true,
                 year: true,
                 month: true,
                 status: true,
                 periodStartDate: true,
                 closingDate: true,
+                dueDate: true,
             },
         });
 
         return periods.map((p) => ({
+            id: p.id,
             year: p.year,
             month: p.month,
             status: p.status,
             periodStartDate: p.periodStartDate.toISOString(),
             closingDate: p.closingDate.toISOString(),
+            dueDate: p.dueDate.toISOString(),
         }));
     }
 }
