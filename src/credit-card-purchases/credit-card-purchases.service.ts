@@ -817,37 +817,43 @@ export class CreditCardPurchasesService {
                     where: { purchaseId },
                 });
 
-                const occurredDate = updated.occurredAt;
-
-                const openStatement = await tx.creditCardStatement.findFirst({
-                    where: {
-                        creditCardId: updated.creditCardId,
-                        status: 'OPEN',
-                        periodStartDate: { lte: occurredDate },
-                        closingDate: { gt: occurredDate },
-                    },
-                    orderBy: { periodStartDate: 'desc' },
-                });
-
                 let firstStatementSequence: number;
 
-                if (openStatement) {
-                    firstStatementSequence = openStatement.sequenceNumber;
-                } else {
-                    const lastStatement = await tx.creditCardStatement.findFirst({
-                        where: { creditCardId: updated.creditCardId },
-                        orderBy: { sequenceNumber: 'desc' },
+                if (purchaseUpdateData.occurredAt !== undefined) {
+                    // occurredAt changed → recalculate which statement owns this purchase
+                    const occurredDate = updated.occurredAt;
+
+                    const openStatement = await tx.creditCardStatement.findFirst({
+                        where: {
+                            creditCardId: updated.creditCardId,
+                            status: 'OPEN',
+                            periodStartDate: { lte: occurredDate },
+                            closingDate: { gt: occurredDate },
+                        },
+                        orderBy: { periodStartDate: 'desc' },
                     });
 
-                    firstStatementSequence = lastStatement
-                        ? lastStatement.sequenceNumber + 1
-                        : 1;
-                }
+                    if (openStatement) {
+                        firstStatementSequence = openStatement.sequenceNumber;
+                    } else {
+                        const lastStatement = await tx.creditCardStatement.findFirst({
+                            where: { creditCardId: updated.creditCardId },
+                            orderBy: { sequenceNumber: 'desc' },
+                        });
 
-                await tx.creditCardPurchase.update({
-                    where: { id: purchaseId },
-                    data: { firstStatementSequence },
-                });
+                        firstStatementSequence = lastStatement
+                            ? lastStatement.sequenceNumber + 1
+                            : 1;
+                    }
+
+                    await tx.creditCardPurchase.update({
+                        where: { id: purchaseId },
+                        data: { firstStatementSequence },
+                    });
+                } else {
+                    // Solo cambió monto o cuotas → conservar el período asignado original
+                    firstStatementSequence = purchase.firstStatementSequence;
+                }
 
                 const { totalAmountCents, installmentsCount } = updated;
 
