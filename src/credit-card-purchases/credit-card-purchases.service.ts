@@ -636,16 +636,31 @@ export class CreditCardPurchasesService {
         await this.validateCard(userId, creditCardId);
 
         const occurredDate = new Date(occurredAt);
-        const year = occurredDate.getUTCFullYear();
-        const month = occurredDate.getUTCMonth() + 1;
+        let year = occurredDate.getUTCFullYear();
+        let month = occurredDate.getUTCMonth() + 1;
 
         return this.prisma.$transaction(async (tx) => {
 
-            // Buscar o crear el statement para el mes/año de la devolución
-            let stmt = await tx.creditCardStatement.findUnique({
+            // Si el período del mes de la fecha ya cerró antes de occurredAt,
+            // la devolución pertenece al siguiente período.
+            const existingStmt = await tx.creditCardStatement.findUnique({
                 where: { creditCardId_year_month: { creditCardId, year, month } },
-                select: { id: true, sequenceNumber: true, status: true },
+                select: { id: true, sequenceNumber: true, status: true, closingDate: true },
             });
+
+            if (existingStmt && existingStmt.closingDate < occurredDate) {
+                const totalMonths = year * 12 + month; // avanzar un mes
+                year = Math.floor(totalMonths / 12);
+                month = (totalMonths % 12) + 1;
+            }
+
+            // Buscar o crear el statement para el período correcto
+            let stmt = existingStmt && !(existingStmt.closingDate < occurredDate)
+                ? existingStmt
+                : await tx.creditCardStatement.findUnique({
+                    where: { creditCardId_year_month: { creditCardId, year, month } },
+                    select: { id: true, sequenceNumber: true, status: true },
+                });
 
             if (!stmt) {
                 const statementsBefore = await tx.creditCardStatement.count({
