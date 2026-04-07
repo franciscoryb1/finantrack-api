@@ -339,9 +339,41 @@ export class CreditCardStatementsService {
                 throw new BadRequestException('Statement already paid');
             }
 
+            // Calcular total dinámicamente desde las cuotas del período (por si totalCents quedó desactualizado,
+            // p.ej. cuando se agregó una compra después de cerrar el resumen)
+            const periodInstallments = await tx.creditCardInstallment.findMany({
+                where: {
+                    purchase: {
+                        creditCardId: statement.creditCardId,
+                        isDeleted: false,
+                    },
+                },
+                select: {
+                    id: true,
+                    amountCents: true,
+                    billingCycleOffset: true,
+                    status: true,
+                    purchase: { select: { firstStatementSequence: true } },
+                },
+            });
+
+            const installmentsForThisPeriod = periodInstallments.filter(
+                (i) => i.purchase.firstStatementSequence + i.billingCycleOffset === statement.sequenceNumber,
+            );
+
+            const dynamicInstallmentsTotal = installmentsForThisPeriod.reduce(
+                (sum, i) => sum + i.amountCents,
+                0,
+            );
+
+            // Si totalCents almacenado difiere del dinámico (e.g. compras añadidas post-cierre), corregirlo
+            const effectiveTotalCents = dynamicInstallmentsTotal > 0
+                ? dynamicInstallmentsTotal
+                : statement.totalCents;
+
             // Total real = cuotas del resumen + conceptos adicionales (pueden ser negativos)
             const extrasTotalCents = statement.extras.reduce((sum, e) => sum + e.amountCents, 0);
-            const totalPaymentCents = statement.totalCents + extrasTotalCents;
+            const totalPaymentCents = effectiveTotalCents + extrasTotalCents;
 
             if (totalPaymentCents <= 0) {
                 throw new BadRequestException('El total a pagar debe ser mayor a cero');
@@ -399,16 +431,22 @@ export class CreditCardStatementsService {
                 },
             });
 
-            // 5️⃣ Marcar cuotas como PAID
-            await tx.creditCardInstallment.updateMany({
-                where: { statementId: statement.id, status: CreditCardInstallmentStatus.BILLED },
-                data: { status: CreditCardInstallmentStatus.PAID },
-            });
+            // 5️⃣ Marcar cuotas del período como PAID (incluyendo las que no fueron linkeadas al cerrar)
+            const installmentIdsForThisPeriod = installmentsForThisPeriod.map((i) => i.id);
+            if (installmentIdsForThisPeriod.length > 0) {
+                await tx.creditCardInstallment.updateMany({
+                    where: { id: { in: installmentIdsForThisPeriod } },
+                    data: { status: CreditCardInstallmentStatus.PAID, statementId: statement.id },
+                });
+            }
 
-            // 6️⃣ Marcar statement como PAID
+            // 6️⃣ Marcar statement como PAID (y corregir totalCents si estaba desactualizado)
             return tx.creditCardStatement.update({
                 where: { id: statement.id },
-                data: { status: CreditCardStatementStatus.PAID },
+                data: {
+                    status: CreditCardStatementStatus.PAID,
+                    totalCents: effectiveTotalCents,
+                },
             });
         });
     }
