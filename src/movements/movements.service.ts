@@ -227,11 +227,28 @@ export class MovementsService {
                 where: { movementId: movement.id },
             });
 
-            // Desreferenciar reintegros compartidos que apuntan a este movimiento
-            await tx.movement.updateMany({
-                where: { sharedFromMovementId: movement.id },
-                data: { sharedFromMovementId: null },
+            // Eliminar reintegros de gasto compartido y revertir su efecto en el saldo
+            const sharedReimbursements = await tx.movement.findMany({
+                where: { sharedFromMovementId: movement.id, isDeleted: false },
+                select: { id: true, accountId: true, amountCents: true },
             });
+
+            for (const reimbursement of sharedReimbursements) {
+                const reimbAccount = await tx.account.findFirst({
+                    where: { id: reimbursement.accountId },
+                    select: { id: true, currentBalanceCents: true },
+                });
+                if (reimbAccount) {
+                    await tx.account.update({
+                        where: { id: reimbAccount.id },
+                        data: { currentBalanceCents: reimbAccount.currentBalanceCents - reimbursement.amountCents },
+                    });
+                }
+                await tx.movement.update({
+                    where: { id: reimbursement.id },
+                    data: { isDeleted: true },
+                });
+            }
 
             await tx.movement.update({
                 where: { id: movement.id },
