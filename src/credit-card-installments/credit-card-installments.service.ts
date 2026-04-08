@@ -257,6 +257,10 @@ export class InstallmentsService {
                             select: { id: true, name: true, color: true, parent: { select: { id: true, name: true, color: true } } },
                         },
                         tags: { select: { id: true, name: true, color: true } },
+                        sharedReimbursements: {
+                            where: { isDeleted: false },
+                            select: { amountCents: true },
+                        },
                     },
                 },
             },
@@ -281,6 +285,10 @@ export class InstallmentsService {
                     },
                 });
 
+                const purchaseReceivedCents = (inst.purchase.sharedReimbursements ?? []).reduce(
+                    (s: number, r: { amountCents: number }) => s + r.amountCents, 0,
+                );
+
                 purchasesMap.set(inst.purchaseId, {
                     purchaseId: inst.purchase.id,
                     description: inst.purchase.description,
@@ -292,6 +300,14 @@ export class InstallmentsService {
                         inst.purchase.installmentsCount - paidCount,
                     isCredit: inst.purchase.isCredit,
                     tags: inst.purchase.tags,
+                    sharedAmountCents: inst.purchase.sharedAmountCents ?? null,
+                    sharedExpense: inst.purchase.sharedAmountCents
+                        ? {
+                              sharedAmountCents: inst.purchase.sharedAmountCents,
+                              receivedAmountCents: purchaseReceivedCents,
+                              pendingAmountCents: inst.purchase.sharedAmountCents - purchaseReceivedCents,
+                          }
+                        : null,
                     category: inst.purchase.category
                         ? {
                               id: inst.purchase.category.id,

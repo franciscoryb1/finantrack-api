@@ -32,4 +32,8 @@ export class CreateMovementDto {
     @IsInt()
     @IsPositive()
     sharedAmountCents?: number;
+
+    @IsOptional()
+    @IsInt()
+    sharedReimbursementAccountId?: number;
 }

@@ -44,6 +44,10 @@ export class CreatePurchaseDto {
     sharedAmountCents?: number;
 
     @IsOptional()
+    @IsInt()
+    sharedReimbursementAccountId?: number;
+
+    @IsOptional()
     @IsArray()
     @IsInt({ each: true })
     tagIds?: number[];

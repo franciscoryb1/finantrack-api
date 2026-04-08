@@ -33,7 +33,7 @@ export class MovementsService {
     }
 
     async createMovement(userId: number, dto: CreateMovementDto) {
-        const { accountId, categoryId, type, amountCents, occurredAt, description, tagIds, sharedAmountCents } = dto;
+        const { accountId, categoryId, type, amountCents, occurredAt, description, tagIds, sharedAmountCents, sharedReimbursementAccountId } = dto;
 
         await this.validateCategory(userId, categoryId);
 
@@ -72,6 +72,33 @@ export class MovementsService {
                 where: { id: accountId },
                 data: { currentBalanceCents: newBalance },
             });
+
+            // Si hay gasto compartido con cuenta destino, crear el ingreso automáticamente
+            if (sharedAmountCents && sharedReimbursementAccountId) {
+                const reimbAccount = await tx.account.findFirst({
+                    where: { id: sharedReimbursementAccountId, userId, isActive: true },
+                    select: { id: true, currentBalanceCents: true },
+                });
+                if (!reimbAccount) throw new BadRequestException('Reimbursement account not found or inactive');
+
+                const reimbBalance = reimbAccount.currentBalanceCents + sharedAmountCents;
+                await tx.movement.create({
+                    data: {
+                        userId,
+                        accountId: sharedReimbursementAccountId,
+                        type: MovementType.INCOME,
+                        amountCents: sharedAmountCents,
+                        occurredAt: new Date(occurredAt),
+                        description: description ? `Reintegro - ${description}` : 'Reintegro',
+                        balanceSnapshotCents: reimbBalance,
+                        sharedFromMovementId: movement.id,
+                    },
+                });
+                await tx.account.update({
+                    where: { id: sharedReimbursementAccountId },
+                    data: { currentBalanceCents: reimbBalance },
+                });
+            }
 
             return movement;
         });
@@ -280,7 +307,7 @@ export class MovementsService {
                     sharedAmountCents: true,
                     sharedReimbursements: {
                         where: { isDeleted: false },
-                        select: { amountCents: true },
+                        select: { id: true, accountId: true, amountCents: true },
                     },
                 },
             });
@@ -315,10 +342,6 @@ export class MovementsService {
                     const effectiveAmount = dto.amountCents ?? original.amountCents;
                     if (dto.sharedAmountCents > effectiveAmount) {
                         throw new BadRequestException('sharedAmountCents cannot exceed amountCents');
-                    }
-                    const alreadyReceived = original.sharedReimbursements.reduce((s, r) => s + r.amountCents, 0);
-                    if (dto.sharedAmountCents < alreadyReceived) {
-                        throw new BadRequestException(`sharedAmountCents cannot be less than already received reimbursements (${alreadyReceived} cents)`);
                     }
                 }
             }
@@ -391,6 +414,26 @@ export class MovementsService {
                     where: { id: nextAccountId },
                     data: { currentBalanceCents: nextAccountBalance },
                 });
+            }
+
+            // Si se eliminó el gasto compartido, revertir y eliminar los reintegros derivados
+            if (dto.sharedAmountCents === null && original.sharedReimbursements.length > 0) {
+                for (const reimbursement of original.sharedReimbursements) {
+                    const reimbAccount = await tx.account.findFirst({
+                        where: { id: reimbursement.accountId },
+                        select: { id: true, currentBalanceCents: true },
+                    });
+                    if (reimbAccount) {
+                        await tx.account.update({
+                            where: { id: reimbAccount.id },
+                            data: { currentBalanceCents: reimbAccount.currentBalanceCents - reimbursement.amountCents },
+                        });
+                    }
+                    await tx.movement.update({
+                        where: { id: reimbursement.id },
+                        data: { isDeleted: true },
+                    });
+                }
             }
 
             return { success: true };

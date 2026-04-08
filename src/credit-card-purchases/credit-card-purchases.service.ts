@@ -213,6 +213,7 @@ export class CreditCardPurchasesService {
             reimbursementAccountId,
             reimbursementAt,
             sharedAmountCents,
+            sharedReimbursementAccountId,
             tagIds,
         } = dto;
 
@@ -414,6 +415,33 @@ export class CreditCardPurchasesService {
                     reimbAt,
                     description ?? null,
                 );
+            }
+
+            // Si hay gasto compartido con cuenta destino, crear el ingreso automáticamente
+            if (sharedAmountCents && sharedReimbursementAccountId) {
+                const reimbAccount = await tx.account.findFirst({
+                    where: { id: sharedReimbursementAccountId, userId, isActive: true },
+                    select: { id: true, currentBalanceCents: true },
+                });
+                if (!reimbAccount) throw new BadRequestException('Reimbursement account not found or inactive');
+
+                const reimbBalance = reimbAccount.currentBalanceCents + sharedAmountCents;
+                await tx.movement.create({
+                    data: {
+                        userId,
+                        accountId: sharedReimbursementAccountId,
+                        type: MovementType.INCOME,
+                        amountCents: sharedAmountCents,
+                        occurredAt: occurredDate,
+                        description: description ? `Reintegro - ${description}` : 'Reintegro',
+                        balanceSnapshotCents: reimbBalance,
+                        sharedFromCreditCardPurchaseId: purchase.id,
+                    },
+                });
+                await tx.account.update({
+                    where: { id: sharedReimbursementAccountId },
+                    data: { currentBalanceCents: reimbBalance },
+                });
             }
 
             return purchase;
@@ -882,7 +910,18 @@ export class CreditCardPurchasesService {
                 });
             }
 
-            // ── Manejar cambios en el reintegro ──
+            // ── Eliminar reintegros de gasto compartido si se removió sharedAmountCents ──
+            if (sharedAmountCents === null) {
+                const sharedReimbursements = await tx.movement.findMany({
+                    where: { sharedFromCreditCardPurchaseId: purchaseId, isDeleted: false },
+                    select: { id: true },
+                });
+                for (const r of sharedReimbursements) {
+                    await this.deleteReimbursementMovement(tx, r.id);
+                }
+            }
+
+            // ── Manejar cambios en el reintegro promo ──
             if (isChangingReimbursement) {
                 const clearing = reimbursementAmountCents === null;
 
@@ -1057,16 +1096,19 @@ export class CreditCardPurchasesService {
         }
 
         return this.prisma.$transaction(async (tx) => {
-            // Eliminar movimiento de reintegro si existe
+            // Eliminar movimiento de reintegro promo si existe
             if (purchase.reimbursementMovementId) {
                 await this.deleteReimbursementMovement(tx, purchase.reimbursementMovementId);
             }
 
-            // Desreferenciar reintegros compartidos que apuntan a esta compra
-            await tx.movement.updateMany({
-                where: { sharedFromCreditCardPurchaseId: purchaseId },
-                data: { sharedFromCreditCardPurchaseId: null },
+            // Eliminar reintegros de gasto compartido y revertir sus saldos
+            const sharedReimbursements = await tx.movement.findMany({
+                where: { sharedFromCreditCardPurchaseId: purchaseId, isDeleted: false },
+                select: { id: true },
             });
+            for (const r of sharedReimbursements) {
+                await this.deleteReimbursementMovement(tx, r.id);
+            }
 
             await tx.creditCardInstallment.deleteMany({
                 where: { purchaseId },
