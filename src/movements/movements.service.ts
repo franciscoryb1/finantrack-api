@@ -21,6 +21,14 @@ export class MovementsService {
         if (balance < 0) throw new BadRequestException('Insufficient account balance');
     }
 
+    // Si la string ya incluye hora ('T'), se parsea tal cual.
+    // Si es solo fecha (YYYY-MM-DD), se interpreta como inicio o fin de día en ART (UTC-3).
+    private parseFilterDate(dateStr: string, endOfDay = false): Date {
+        if (dateStr.includes('T')) return new Date(dateStr);
+        const time = endOfDay ? 'T23:59:59' : 'T00:00:00';
+        return new Date(`${dateStr}${time}-03:00`);
+    }
+
     private async validateCategory(userId: number, categoryId?: number | null) {
         if (!categoryId) return;
 
@@ -117,8 +125,8 @@ export class MovementsService {
 
         if (fromDate || toDate) {
             where.occurredAt = {};
-            if (fromDate) where.occurredAt.gte = new Date(fromDate);
-            if (toDate) where.occurredAt.lte = new Date(toDate);
+            if (fromDate) where.occurredAt.gte = this.parseFilterDate(fromDate);
+            if (toDate) where.occurredAt.lte = this.parseFilterDate(toDate, true);
         }
 
         const result = await this.prisma.movement.groupBy({
@@ -168,8 +176,8 @@ export class MovementsService {
 
         if (fromDate || toDate) {
             where.occurredAt = {};
-            if (fromDate) where.occurredAt.gte = new Date(fromDate);
-            if (toDate) where.occurredAt.lte = new Date(toDate);
+            if (fromDate) where.occurredAt.gte = this.parseFilterDate(fromDate);
+            if (toDate) where.occurredAt.lte = this.parseFilterDate(toDate, true);
         }
 
         const [items, total] = await this.prisma.$transaction([
