@@ -1,454 +1,468 @@
 import {
-    BadRequestException,
-    ForbiddenException,
-    Injectable,
-    NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStatementDto } from './dto/create-statement.dto';
-import { AccountType, CreditCardInstallmentStatus, CreditCardStatementStatus } from '@prisma/client';
+import {
+  AccountType,
+  CreditCardInstallmentStatus,
+  CreditCardStatementStatus,
+} from '@prisma/client';
 import { PayStatementDto } from './dto/pay-statement.dto';
 import { StatementExtraDto } from './dto/statement-extra.dto';
 import { UpdateStatementDatesDto } from './dto/update-statement-dates.dto';
 
 @Injectable()
 export class CreditCardStatementsService {
-    constructor(private readonly prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) {}
 
-    async listByCard(userId: number, creditCardId: number) {
-        return this.prisma.creditCardStatement.findMany({
+  async listByCard(userId: number, creditCardId: number) {
+    return this.prisma.creditCardStatement.findMany({
+      where: {
+        userId,
+        creditCardId,
+      },
+      orderBy: { sequenceNumber: 'desc' },
+    });
+  }
+
+  async getDetail(userId: number, statementId: number) {
+    const statement = await this.prisma.creditCardStatement.findUnique({
+      where: { id: statementId },
+      include: {
+        installments: {
+          include: {
+            purchase: {
+              select: {
+                description: true,
+                occurredAt: true,
+                installmentsCount: true,
+              },
+            },
+          },
+        },
+        payments: true,
+      },
+    });
+
+    if (!statement) throw new NotFoundException();
+    if (statement.userId !== userId) throw new ForbiddenException();
+
+    return statement;
+  }
+
+  // -----------------------
+  // Crear o asegurar statement OPEN
+  // -----------------------
+  async create(userId: number, dto: CreateStatementDto) {
+    const { creditCardId, year, month, periodStartDate, closingDate, dueDate } =
+      dto;
+
+    const card = await this.prisma.creditCard.findFirst({
+      where: { id: creditCardId, userId, isActive: true },
+    });
+
+    if (!card) {
+      throw new ForbiddenException('Invalid credit card');
+    }
+
+    const existing = await this.prisma.creditCardStatement.findUnique({
+      where: {
+        creditCardId_year_month: {
+          creditCardId,
+          year,
+          month,
+        },
+      },
+    });
+
+    if (existing) {
+      return existing; // idempotente
+    }
+
+    // busco el último statement de la tarjeta
+    const lastStatement = await this.prisma.creditCardStatement.findFirst({
+      where: {
+        creditCardId,
+      },
+      orderBy: {
+        sequenceNumber: 'desc',
+      },
+    });
+
+    const nextSequenceNumber = lastStatement
+      ? lastStatement.sequenceNumber + 1
+      : 1;
+
+    return this.prisma.creditCardStatement.create({
+      data: {
+        userId,
+        creditCardId,
+        sequenceNumber: nextSequenceNumber,
+        year,
+        month,
+        periodStartDate: new Date(periodStartDate),
+        closingDate: new Date(closingDate),
+        dueDate: new Date(dueDate),
+        status: CreditCardStatementStatus.OPEN,
+      },
+    });
+  }
+
+  async updateDates(
+    userId: number,
+    statementId: number,
+    dto: UpdateStatementDatesDto,
+  ) {
+    const { closingDate, dueDate } = dto;
+
+    if (!closingDate && !dueDate) {
+      throw new BadRequestException('Nothing to update');
+    }
+
+    const statement = await this.prisma.creditCardStatement.findUnique({
+      where: { id: statementId },
+    });
+
+    if (!statement) {
+      throw new NotFoundException('Statement not found');
+    }
+
+    if (statement.userId !== userId) {
+      throw new ForbiddenException();
+    }
+
+    if (statement.status !== CreditCardStatementStatus.OPEN) {
+      throw new BadRequestException('Only open statements can be edited');
+    }
+
+    return this.prisma.creditCardStatement.update({
+      where: { id: statement.id },
+      data: {
+        ...(closingDate && { closingDate: new Date(closingDate) }),
+        ...(dueDate && { dueDate: new Date(dueDate) }),
+      },
+    });
+  }
+
+  // -----------------------
+  // Cerrar statement
+  // -----------------------
+  async close(userId: number, statementId: number) {
+    return this.prisma.$transaction(async (tx) => {
+      // 1️⃣ Traer statement
+      const statement = await tx.creditCardStatement.findUnique({
+        where: { id: statementId },
+      });
+
+      if (!statement) {
+        throw new NotFoundException('Statement not found');
+      }
+
+      if (statement.userId !== userId) {
+        throw new ForbiddenException();
+      }
+
+      if (statement.status === CreditCardStatementStatus.PAID) {
+        throw new BadRequestException('Paid statement cannot be closed');
+      }
+
+      if (statement.status !== CreditCardStatementStatus.OPEN) {
+        throw new BadRequestException('Statement is not open');
+      }
+
+      // traigo cuotas pendientes
+      const purchases = await tx.creditCardPurchase.findMany({
+        where: {
+          creditCardId: statement.creditCardId,
+          isDeleted: false,
+
+          OR: [
+            // 🔹 compras en cuotas con algo pendiente
+            {
+              installments: {
+                some: {
+                  status: CreditCardInstallmentStatus.PENDING,
+                },
+              },
+            },
+
+            // 🔹 compras en 1 pago que corresponden a este statement
+            {
+              installmentsCount: 1,
+              firstStatementSequence: statement.sequenceNumber,
+            },
+          ],
+        },
+        select: {
+          id: true,
+          installmentsCount: true,
+          firstStatementSequence: true,
+          totalAmountCents: true,
+
+          installments: {
             where: {
-                userId,
-                creditCardId,
+              status: CreditCardInstallmentStatus.PENDING,
             },
-            orderBy: { sequenceNumber: 'desc' },
-        });
-    }
-
-    async getDetail(userId: number, statementId: number) {
-        const statement = await this.prisma.creditCardStatement.findUnique({
-            where: { id: statementId },
-            include: {
-                installments: {
-                    include: {
-                        purchase: {
-                            select: {
-                                description: true,
-                                occurredAt: true,
-                                installmentsCount: true,
-                            },
-                        },
-                    },
-                },
-                payments: true,
+            select: {
+              id: true,
+              amountCents: true,
+              billingCycleOffset: true,
+              statementId: true,
             },
+          },
+        },
+      });
+
+      const installmentsToBill = purchases.flatMap((purchase) =>
+        purchase.installments.filter(
+          (installment) =>
+            purchase.installmentsCount > 1 &&
+            (installment.statementId === statement.id ||
+              (installment.statementId === null &&
+                purchase.firstStatementSequence! +
+                  installment.billingCycleOffset ===
+                  statement.sequenceNumber)),
+        ),
+      );
+
+      const installmentsTotal = installmentsToBill.reduce(
+        (sum, i) => sum + i.amountCents,
+        0,
+      );
+
+      // marco las cuotas como BIILED
+      if (installmentsToBill.length > 0) {
+        await tx.creditCardInstallment.updateMany({
+          where: {
+            id: { in: installmentsToBill.map((i) => i.id) },
+          },
+          data: {
+            status: CreditCardInstallmentStatus.BILLED,
+            statementId: statement.id,
+            year: statement.year,
+            month: statement.month,
+          },
         });
+      }
 
-        if (!statement) throw new NotFoundException();
-        if (statement.userId !== userId) throw new ForbiddenException();
+      // traigo las compras en un unico pago dentro del período del statement
+      const singlePaymentPurchases = purchases.filter(
+        (purchase) =>
+          purchase.installmentsCount === 1 &&
+          purchase.firstStatementSequence === statement.sequenceNumber,
+      );
 
-        return statement;
+      // total de compras en un unico pago
+      const singlePaymentsTotal = singlePaymentPurchases.reduce(
+        (sum, p) => sum + p.totalAmountCents,
+        0,
+      );
+
+      // monto total del statement
+      const totalCents = installmentsTotal + singlePaymentsTotal;
+
+      // 6️⃣ Cerrar statement
+      return tx.creditCardStatement.update({
+        where: { id: statement.id },
+        data: {
+          status: CreditCardStatementStatus.CLOSED,
+          totalCents,
+        },
+      });
+    });
+  }
+
+  async addExtra(userId: number, statementId: number, dto: StatementExtraDto) {
+    const statement = await this.prisma.creditCardStatement.findUnique({
+      where: { id: statementId },
+    });
+
+    if (!statement) throw new NotFoundException('Statement not found');
+    if (statement.userId !== userId) throw new ForbiddenException();
+    if (statement.status !== CreditCardStatementStatus.CLOSED) {
+      throw new BadRequestException(
+        'Only closed statements can have extras added',
+      );
     }
 
-    // -----------------------
-    // Crear o asegurar statement OPEN
-    // -----------------------
-    async create(userId: number, dto: CreateStatementDto) {
-        const {
-            creditCardId,
-            year,
-            month,
-            periodStartDate,
-            closingDate,
-            dueDate,
-        } = dto;
+    return this.prisma.creditCardStatementExtra.create({
+      data: {
+        statementId,
+        description: dto.description,
+        amountCents: dto.amountCents,
+      },
+    });
+  }
 
-        const card = await this.prisma.creditCard.findFirst({
-            where: { id: creditCardId, userId, isActive: true },
-        });
+  async removeExtra(userId: number, statementId: number, extraId: number) {
+    const extra = await this.prisma.creditCardStatementExtra.findUnique({
+      where: { id: extraId },
+      include: { statement: { select: { userId: true, status: true } } },
+    });
 
-        if (!card) {
-            throw new ForbiddenException('Invalid credit card');
-        }
-
-        const existing = await this.prisma.creditCardStatement.findUnique({
-            where: {
-                creditCardId_year_month: {
-                    creditCardId,
-                    year,
-                    month,
-                },
-            },
-        });
-
-        if (existing) {
-            return existing; // idempotente
-        }
-
-        // busco el último statement de la tarjeta
-        const lastStatement = await this.prisma.creditCardStatement.findFirst({
-            where: {
-                creditCardId,
-            },
-            orderBy: {
-                sequenceNumber: 'desc',
-            },
-        });
-
-        const nextSequenceNumber = lastStatement ? lastStatement.sequenceNumber + 1 : 1;
-
-        return this.prisma.creditCardStatement.create({
-            data: {
-                userId,
-                creditCardId,
-                sequenceNumber: nextSequenceNumber,
-                year,
-                month,
-                periodStartDate: new Date(periodStartDate),
-                closingDate: new Date(closingDate),
-                dueDate: new Date(dueDate),
-                status: CreditCardStatementStatus.OPEN,
-            },
-        });
+    if (!extra) throw new NotFoundException('Extra not found');
+    if (extra.statement.userId !== userId) throw new ForbiddenException();
+    if (extra.statementId !== statementId)
+      throw new BadRequestException('Extra does not belong to this statement');
+    if (extra.statement.status !== CreditCardStatementStatus.CLOSED) {
+      throw new BadRequestException(
+        'Only closed statements can have extras removed',
+      );
     }
 
-    async updateDates(
-        userId: number,
-        statementId: number,
-        dto: UpdateStatementDatesDto,
-    ) {
-        const { closingDate, dueDate } = dto;
+    await this.prisma.creditCardStatementExtra.delete({
+      where: { id: extraId },
+    });
+  }
 
-        if (!closingDate && !dueDate) {
-            throw new BadRequestException('Nothing to update');
-        }
+  async pay(userId: number, statementId: number, dto: PayStatementDto) {
+    const { accountId, description, paidAt } = dto;
 
-        const statement = await this.prisma.creditCardStatement.findUnique({
-            where: { id: statementId },
+    return this.prisma.$transaction(async (tx) => {
+      // 1️⃣ Traer statement con sus extras
+      const statement = await tx.creditCardStatement.findUnique({
+        where: { id: statementId },
+        include: { extras: true },
+      });
+
+      if (!statement) throw new NotFoundException('Statement not found');
+      if (statement.userId !== userId) throw new ForbiddenException();
+
+      if (statement.status === CreditCardStatementStatus.OPEN) {
+        throw new BadRequestException('Statement is not closed');
+      }
+      if (statement.status === CreditCardStatementStatus.PAID) {
+        throw new BadRequestException('Statement already paid');
+      }
+
+      // Calcular total dinámicamente desde las cuotas del período (por si totalCents quedó desactualizado,
+      // p.ej. cuando se agregó una compra después de cerrar el resumen)
+      const periodInstallments = await tx.creditCardInstallment.findMany({
+        where: {
+          purchase: {
+            creditCardId: statement.creditCardId,
+            isDeleted: false,
+          },
+        },
+        select: {
+          id: true,
+          amountCents: true,
+          billingCycleOffset: true,
+          status: true,
+          purchase: { select: { firstStatementSequence: true } },
+        },
+      });
+
+      const installmentsForThisPeriod = periodInstallments.filter(
+        (i) =>
+          i.purchase.firstStatementSequence! + i.billingCycleOffset ===
+          statement.sequenceNumber,
+      );
+
+      const dynamicInstallmentsTotal = installmentsForThisPeriod.reduce(
+        (sum, i) => sum + i.amountCents,
+        0,
+      );
+
+      // Si totalCents almacenado difiere del dinámico (e.g. compras añadidas post-cierre), corregirlo
+      const effectiveTotalCents =
+        dynamicInstallmentsTotal > 0
+          ? dynamicInstallmentsTotal
+          : statement.totalCents;
+
+      // Total real = cuotas del resumen + conceptos adicionales (pueden ser negativos)
+      const extrasTotalCents = statement.extras.reduce(
+        (sum, e) => sum + e.amountCents,
+        0,
+      );
+      const totalPaymentCents = effectiveTotalCents + extrasTotalCents;
+
+      if (totalPaymentCents <= 0) {
+        throw new BadRequestException('El total a pagar debe ser mayor a cero');
+      }
+
+      // 2️⃣ Validar cuenta de pago
+      const account = await tx.account.findFirst({
+        where: {
+          id: accountId,
+          userId,
+          isActive: true,
+          type: {
+            in: [AccountType.CASH, AccountType.BANK, AccountType.WALLET],
+          },
+        },
+      });
+
+      if (!account) {
+        throw new BadRequestException(
+          'Payment account must be CASH, BANK or WALLET',
+        );
+      }
+
+      // 3️⃣ Crear movimiento
+      const newBalance = account.currentBalanceCents - totalPaymentCents;
+
+      if (newBalance < 0) {
+        throw new BadRequestException('Insufficient account balance');
+      }
+
+      const movement = await tx.movement.create({
+        data: {
+          userId,
+          accountId,
+          type: 'STATEMENT_PAYMENT',
+          amountCents: totalPaymentCents,
+          occurredAt: paidAt ? new Date(paidAt) : new Date(),
+          description:
+            description ??
+            `Pago resumen tarjeta ${statement.creditCardId} ${statement.month}/${statement.year}`,
+          balanceSnapshotCents: newBalance,
+        },
+      });
+
+      await tx.account.update({
+        where: { id: account.id },
+        data: { currentBalanceCents: newBalance },
+      });
+
+      // 4️⃣ Crear registro de pago
+      await tx.creditCardPayment.create({
+        data: {
+          userId,
+          statementId: statement.id,
+          paidFromAccountId: accountId,
+          movementId: movement.id,
+          amountCents: totalPaymentCents,
+          paidAt: paidAt ? new Date(paidAt) : new Date(),
+        },
+      });
+
+      // 5️⃣ Marcar cuotas del período como PAID (incluyendo las que no fueron linkeadas al cerrar)
+      const installmentIdsForThisPeriod = installmentsForThisPeriod.map(
+        (i) => i.id,
+      );
+      if (installmentIdsForThisPeriod.length > 0) {
+        await tx.creditCardInstallment.updateMany({
+          where: { id: { in: installmentIdsForThisPeriod } },
+          data: {
+            status: CreditCardInstallmentStatus.PAID,
+            statementId: statement.id,
+          },
         });
+      }
 
-        if (!statement) {
-            throw new NotFoundException('Statement not found');
-        }
-
-        if (statement.userId !== userId) {
-            throw new ForbiddenException();
-        }
-
-        if (statement.status !== CreditCardStatementStatus.OPEN) {
-            throw new BadRequestException(
-                'Only open statements can be edited',
-            );
-        }
-
-        return this.prisma.creditCardStatement.update({
-            where: { id: statement.id },
-            data: {
-                ...(closingDate && { closingDate: new Date(closingDate) }),
-                ...(dueDate && { dueDate: new Date(dueDate) }),
-            },
-        });
-    }
-
-
-    // -----------------------
-    // Cerrar statement
-    // -----------------------
-    async close(userId: number, statementId: number) {
-        return this.prisma.$transaction(async (tx) => {
-
-            // 1️⃣ Traer statement
-            const statement = await tx.creditCardStatement.findUnique({
-                where: { id: statementId },
-            });
-
-            if (!statement) {
-                throw new NotFoundException('Statement not found');
-            }
-
-            if (statement.userId !== userId) {
-                throw new ForbiddenException();
-            }
-
-            if (statement.status === CreditCardStatementStatus.PAID) {
-                throw new BadRequestException('Paid statement cannot be closed');
-            }
-
-            if (statement.status !== CreditCardStatementStatus.OPEN) {
-                throw new BadRequestException('Statement is not open');
-            }
-
-            // traigo cuotas pendientes
-            const purchases = await tx.creditCardPurchase.findMany({
-                where: {
-                    creditCardId: statement.creditCardId,
-                    isDeleted: false,
-
-                    OR: [
-                        // 🔹 compras en cuotas con algo pendiente
-                        {
-                            installments: {
-                                some: {
-                                    status: CreditCardInstallmentStatus.PENDING,
-                                },
-                            },
-                        },
-
-                        // 🔹 compras en 1 pago que corresponden a este statement
-                        {
-                            installmentsCount: 1,
-                            firstStatementSequence: statement.sequenceNumber,
-                        },
-                    ],
-                },
-                select: {
-                    id: true,
-                    installmentsCount: true,
-                    firstStatementSequence: true,
-                    totalAmountCents: true,
-
-                    installments: {
-                        where: {
-                            status: CreditCardInstallmentStatus.PENDING,
-                        },
-                        select: {
-                            id: true,
-                            amountCents: true,
-                            billingCycleOffset: true,
-                            statementId: true,
-                        },
-                    },
-                },
-            });
-
-            const installmentsToBill = purchases.flatMap((purchase) =>
-                purchase.installments.filter(
-                    (installment) =>
-                        purchase.installmentsCount > 1 &&
-                        (
-                            installment.statementId === statement.id ||
-                            (installment.statementId === null &&
-                                purchase.firstStatementSequence + installment.billingCycleOffset === statement.sequenceNumber)
-                        ),
-                ),
-            );
-
-            const installmentsTotal = installmentsToBill.reduce(
-                (sum, i) => sum + i.amountCents,
-                0,
-            );
-
-
-            // marco las cuotas como BIILED
-            if (installmentsToBill.length > 0) {
-                await tx.creditCardInstallment.updateMany({
-                    where: {
-                        id: { in: installmentsToBill.map((i) => i.id) },
-                    },
-                    data: {
-                        status: CreditCardInstallmentStatus.BILLED,
-                        statementId: statement.id,
-                        year: statement.year,
-                        month: statement.month,
-                    },
-                });
-            }
-
-            // traigo las compras en un unico pago dentro del período del statement
-            const singlePaymentPurchases = purchases.filter(
-                (purchase) =>
-                    purchase.installmentsCount === 1 &&
-                    purchase.firstStatementSequence === statement.sequenceNumber,
-            );
-
-            // total de compras en un unico pago
-            const singlePaymentsTotal = singlePaymentPurchases.reduce(
-                (sum, p) => sum + p.totalAmountCents,
-                0,
-            );
-
-            // monto total del statement
-            const totalCents = installmentsTotal + singlePaymentsTotal;
-
-            // 6️⃣ Cerrar statement
-            return tx.creditCardStatement.update({
-                where: { id: statement.id },
-                data: {
-                    status: CreditCardStatementStatus.CLOSED,
-                    totalCents,
-                },
-            });
-        });
-    }
-
-
-    async addExtra(userId: number, statementId: number, dto: StatementExtraDto) {
-        const statement = await this.prisma.creditCardStatement.findUnique({
-            where: { id: statementId },
-        });
-
-        if (!statement) throw new NotFoundException('Statement not found');
-        if (statement.userId !== userId) throw new ForbiddenException();
-        if (statement.status !== CreditCardStatementStatus.CLOSED) {
-            throw new BadRequestException('Only closed statements can have extras added');
-        }
-
-        return this.prisma.creditCardStatementExtra.create({
-            data: { statementId, description: dto.description, amountCents: dto.amountCents },
-        });
-    }
-
-    async removeExtra(userId: number, statementId: number, extraId: number) {
-        const extra = await this.prisma.creditCardStatementExtra.findUnique({
-            where: { id: extraId },
-            include: { statement: { select: { userId: true, status: true } } },
-        });
-
-        if (!extra) throw new NotFoundException('Extra not found');
-        if (extra.statement.userId !== userId) throw new ForbiddenException();
-        if (extra.statementId !== statementId) throw new BadRequestException('Extra does not belong to this statement');
-        if (extra.statement.status !== CreditCardStatementStatus.CLOSED) {
-            throw new BadRequestException('Only closed statements can have extras removed');
-        }
-
-        await this.prisma.creditCardStatementExtra.delete({ where: { id: extraId } });
-    }
-
-    async pay(
-        userId: number,
-        statementId: number,
-        dto: PayStatementDto,
-    ) {
-        const { accountId, description, paidAt } = dto;
-
-        return this.prisma.$transaction(async (tx) => {
-
-            // 1️⃣ Traer statement con sus extras
-            const statement = await tx.creditCardStatement.findUnique({
-                where: { id: statementId },
-                include: { extras: true },
-            });
-
-            if (!statement) throw new NotFoundException('Statement not found');
-            if (statement.userId !== userId) throw new ForbiddenException();
-
-            if (statement.status === CreditCardStatementStatus.OPEN) {
-                throw new BadRequestException('Statement is not closed');
-            }
-            if (statement.status === CreditCardStatementStatus.PAID) {
-                throw new BadRequestException('Statement already paid');
-            }
-
-            // Calcular total dinámicamente desde las cuotas del período (por si totalCents quedó desactualizado,
-            // p.ej. cuando se agregó una compra después de cerrar el resumen)
-            const periodInstallments = await tx.creditCardInstallment.findMany({
-                where: {
-                    purchase: {
-                        creditCardId: statement.creditCardId,
-                        isDeleted: false,
-                    },
-                },
-                select: {
-                    id: true,
-                    amountCents: true,
-                    billingCycleOffset: true,
-                    status: true,
-                    purchase: { select: { firstStatementSequence: true } },
-                },
-            });
-
-            const installmentsForThisPeriod = periodInstallments.filter(
-                (i) => i.purchase.firstStatementSequence + i.billingCycleOffset === statement.sequenceNumber,
-            );
-
-            const dynamicInstallmentsTotal = installmentsForThisPeriod.reduce(
-                (sum, i) => sum + i.amountCents,
-                0,
-            );
-
-            // Si totalCents almacenado difiere del dinámico (e.g. compras añadidas post-cierre), corregirlo
-            const effectiveTotalCents = dynamicInstallmentsTotal > 0
-                ? dynamicInstallmentsTotal
-                : statement.totalCents;
-
-            // Total real = cuotas del resumen + conceptos adicionales (pueden ser negativos)
-            const extrasTotalCents = statement.extras.reduce((sum, e) => sum + e.amountCents, 0);
-            const totalPaymentCents = effectiveTotalCents + extrasTotalCents;
-
-            if (totalPaymentCents <= 0) {
-                throw new BadRequestException('El total a pagar debe ser mayor a cero');
-            }
-
-            // 2️⃣ Validar cuenta de pago
-            const account = await tx.account.findFirst({
-                where: {
-                    id: accountId,
-                    userId,
-                    isActive: true,
-                    type: { in: [AccountType.CASH, AccountType.BANK, AccountType.WALLET] },
-                },
-            });
-
-            if (!account) {
-                throw new BadRequestException('Payment account must be CASH, BANK or WALLET');
-            }
-
-            // 3️⃣ Crear movimiento
-            const newBalance = account.currentBalanceCents - totalPaymentCents;
-
-            if (newBalance < 0) {
-                throw new BadRequestException('Insufficient account balance');
-            }
-
-            const movement = await tx.movement.create({
-                data: {
-                    userId,
-                    accountId,
-                    type: 'STATEMENT_PAYMENT',
-                    amountCents: totalPaymentCents,
-                    occurredAt: paidAt ? new Date(paidAt) : new Date(),
-                    description:
-                        description ??
-                        `Pago resumen tarjeta ${statement.creditCardId} ${statement.month}/${statement.year}`,
-                    balanceSnapshotCents: newBalance,
-                },
-            });
-
-            await tx.account.update({
-                where: { id: account.id },
-                data: { currentBalanceCents: newBalance },
-            });
-
-            // 4️⃣ Crear registro de pago
-            await tx.creditCardPayment.create({
-                data: {
-                    userId,
-                    statementId: statement.id,
-                    paidFromAccountId: accountId,
-                    movementId: movement.id,
-                    amountCents: totalPaymentCents,
-                    paidAt: paidAt ? new Date(paidAt) : new Date(),
-                },
-            });
-
-            // 5️⃣ Marcar cuotas del período como PAID (incluyendo las que no fueron linkeadas al cerrar)
-            const installmentIdsForThisPeriod = installmentsForThisPeriod.map((i) => i.id);
-            if (installmentIdsForThisPeriod.length > 0) {
-                await tx.creditCardInstallment.updateMany({
-                    where: { id: { in: installmentIdsForThisPeriod } },
-                    data: { status: CreditCardInstallmentStatus.PAID, statementId: statement.id },
-                });
-            }
-
-            // 6️⃣ Marcar statement como PAID (y corregir totalCents si estaba desactualizado)
-            return tx.creditCardStatement.update({
-                where: { id: statement.id },
-                data: {
-                    status: CreditCardStatementStatus.PAID,
-                    totalCents: effectiveTotalCents,
-                },
-            });
-        });
-    }
-
+      // 6️⃣ Marcar statement como PAID (y corregir totalCents si estaba desactualizado)
+      return tx.creditCardStatement.update({
+        where: { id: statement.id },
+        data: {
+          status: CreditCardStatementStatus.PAID,
+          totalCents: effectiveTotalCents,
+        },
+      });
+    });
+  }
 }

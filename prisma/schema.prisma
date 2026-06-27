@@ -189,6 +189,23 @@ enum CreditCardInstallmentStatus {
   PAID
 }
 
+enum PurchaseStatus {
+  PENDING_REVIEW
+  CONFIRMED
+  DISCARDED
+}
+
+enum PurchaseSource {
+  MANUAL
+  EMAIL
+}
+
+enum ParserConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
 
 model CreditCard {
   id            Int              @id @default(autoincrement())
@@ -222,15 +239,22 @@ model CreditCard {
 model CreditCardPurchase {
   id                Int       @id @default(autoincrement())
   userId             Int
-  creditCardId       Int
+  creditCardId       Int?      // nullable: un draft de email puede no tener tarjeta resuelta
   categoryId         Int?
-  firstStatementSequence Int
+  firstStatementSequence Int?  // nullable: se asigna al materializar (confirmar)
 
   totalAmountCents   Int
   installmentsCount  Int       // >= 1
   occurredAt         DateTime
   description        String?
   sharedAmountCents Int?
+
+  // Ingesta desde emails bancarios (n8n)
+  status            PurchaseStatus    @default(CONFIRMED)
+  source            PurchaseSource    @default(MANUAL)
+  emailMessageId    String?           @unique
+  parserConfidence  ParserConfidence?
+  rawEmailData      Json?
 
   // Reintegro promocional (opcional)
   reimbursementAmountCents Int?
@@ -245,7 +269,7 @@ model CreditCardPurchase {
   updatedAt          DateTime  @updatedAt
 
   user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  creditCard         CreditCard @relation(fields: [creditCardId], references: [id], onDelete: Restrict)
+  creditCard         CreditCard? @relation(fields: [creditCardId], references: [id], onDelete: Restrict)
   category           Category?  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   reimbursementAccount  Account?  @relation("PurchaseReimbursementAccount", fields: [reimbursementAccountId], references: [id], onDelete: Restrict)
   reimbursementMovement Movement? @relation("PurchaseReimbursementMovement", fields: [reimbursementMovementId], references: [id], onDelete: SetNull)
@@ -256,6 +280,7 @@ model CreditCardPurchase {
   recurringPayment   RecurringExpensePayment?
 
   @@index([userId, occurredAt])
+  @@index([userId, status])
   @@index([creditCardId])
   @@index([categoryId])
 }

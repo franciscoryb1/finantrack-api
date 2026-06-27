@@ -1,19 +1,20 @@
 import {
-    Body,
-    Controller,
-    Delete,
-    Get,
-    Param,
-    ParseIntPipe,
-    Patch,
-    Post,
-    Query,
-    Req,
-    UseGuards,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreditCardPurchasesService } from './credit-card-purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { ConfirmPurchaseDto } from './dto/confirm-purchase.dto';
 import { CreateCreditCardCreditDto } from './dto/create-credit.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { ImportLegacyPurchaseDto } from './dto/import-legacy-purchase.dto';
@@ -24,65 +25,90 @@ import { ListByDateRangeDto } from './dto/list-by-date-range.dto';
 @Controller('credit-card-purchases')
 @UseGuards(JwtAuthGuard)
 export class CreditCardPurchasesController {
-    constructor(private readonly service: CreditCardPurchasesService) { }
+  constructor(private readonly service: CreditCardPurchasesService) {}
 
-    @Get()
-    listByDateRange(@Req() req: any, @Query() dto: ListByDateRangeDto) {
-        return this.service.listByDateRange(req.user.userId, dto.fromDate, dto.toDate);
-    }
+  @Get()
+  listByDateRange(@Req() req: any, @Query() dto: ListByDateRangeDto) {
+    return this.service.listByDateRange(
+      req.user.userId,
+      dto.fromDate,
+      dto.toDate,
+    );
+  }
 
-    @Get('card/:cardId')
-    listByCard(
-        @Req() req: any,
-        @Param('cardId', ParseIntPipe) cardId: number,
-    ) {
-        return this.service.listByCard(req.user.userId, cardId);
-    }
+  @Get('card/:cardId')
+  listByCard(@Req() req: any, @Param('cardId', ParseIntPipe) cardId: number) {
+    return this.service.listByCard(req.user.userId, cardId);
+  }
 
-    @Post()
-    create(@Req() req: any, @Body() dto: CreatePurchaseDto) {
-        return this.service.create(req.user.userId, dto);
-    }
+  @Get('pending')
+  listPending(@Req() req: any) {
+    return this.service.listPending(req.user.userId);
+  }
 
-    @Post('credit')
-    createCredit(@Req() req: any, @Body() dto: CreateCreditCardCreditDto) {
-        return this.service.createCredit(req.user.userId, dto);
-    }
+  @Get('pending-count')
+  countPending(@Req() req: any) {
+    return this.service.countPending(req.user.userId);
+  }
 
-    @Post('legacy-import')
-    importLegacy(@Req() req: any, @Body() dto: ImportLegacyPurchaseDto) {
-        return this.service.importLegacy(req.user.userId, dto);
-    }
+  @Post()
+  create(@Req() req: any, @Body() dto: CreatePurchaseDto) {
+    return this.service.create(req.user.userId, dto);
+  }
 
-    @Patch(':id')
-    update(
-        @Req() req: any,
-        @Param('id', ParseIntPipe) id: number,
-        @Body() dto: UpdatePurchaseDto,
-    ) {
-        return this.service.update(req.user.userId, id, dto);
-    }
+  @Post('credit')
+  createCredit(@Req() req: any, @Body() dto: CreateCreditCardCreditDto) {
+    return this.service.createCredit(req.user.userId, dto);
+  }
 
-    @Patch(':id/reassign-card')
-    reassignCard(
-        @Req() req: any,
-        @Param('id', ParseIntPipe) id: number,
-        @Body() dto: ReassignCardDto,
-    ) {
-        return this.service.reassignCard(req.user.userId, id, dto);
-    }
+  @Post('legacy-import')
+  importLegacy(@Req() req: any, @Body() dto: ImportLegacyPurchaseDto) {
+    return this.service.importLegacy(req.user.userId, dto);
+  }
 
-    @Delete(':id')
-    remove(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
-        return this.service.softDelete(req.user.userId, id);
-    }
+  @Patch(':id')
+  update(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePurchaseDto,
+  ) {
+    return this.service.update(req.user.userId, id, dto);
+  }
 
-    @Post(':id/reimburse')
-    reimburse(
-        @Req() req: any,
-        @Param('id', ParseIntPipe) id: number,
-        @Body() dto: RegisterReimbursementDto,
-    ) {
-        return this.service.registerSharedReimbursement(req.user.userId, id, dto);
-    }
+  @Patch(':id/reassign-card')
+  reassignCard(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReassignCardDto,
+  ) {
+    return this.service.reassignCard(req.user.userId, id, dto);
+  }
+
+  @Patch(':id/confirm')
+  confirm(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ConfirmPurchaseDto,
+  ) {
+    return this.service.confirm(req.user.userId, id, dto);
+  }
+
+  @Patch(':id/discard')
+  discard(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.service.discard(req.user.userId, id);
+  }
+
+  @Delete(':id')
+  remove(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.service.softDelete(req.user.userId, id);
+  }
+
+  @Post(':id/reimburse')
+  reimburse(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RegisterReimbursementDto,
+  ) {
+    return this.service.registerSharedReimbursement(req.user.userId, id, dto);
+  }
 }
